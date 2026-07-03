@@ -260,18 +260,37 @@ async def _async_restore(hass: HomeAssistant, saved: dict[str, float]) -> None:
 async def _async_notify(
     hass: HomeAssistant, targets: list[str], message: str, title: str
 ) -> tuple[list[str], list[str]]:
-    """Send the message to each notify target. Returns (notified, failed)."""
+    """Send the message to each notify target. Returns (notified, failed).
+
+    Handles both calling conventions:
+    * classic notify services, e.g. ``notify.mobile_app_phone`` -> call that service;
+    * modern notify entities, e.g. ``notify.phone`` (which have no same-named
+      service) -> call ``notify.send_message`` targeting the entity.
+    """
     notified: list[str] = []
     failed: list[str] = []
     for target in targets:
-        service = target.split(".", 1)[1] if target.startswith("notify.") else target
         try:
-            await hass.services.async_call(
-                "notify",
-                service,
-                {"message": message, "title": title},
-                blocking=True,
-            )
+            if target.startswith("notify.") and hass.states.get(target) is not None:
+                # Modern notify entity: there is no notify.<name> service, so use
+                # the generic send_message action targeting the entity.
+                await hass.services.async_call(
+                    "notify",
+                    "send_message",
+                    {"entity_id": target, "message": message, "title": title},
+                    blocking=True,
+                )
+            else:
+                # Classic notify service, e.g. notify.mobile_app_phone.
+                service = (
+                    target.split(".", 1)[1] if target.startswith("notify.") else target
+                )
+                await hass.services.async_call(
+                    "notify",
+                    service,
+                    {"message": message, "title": title},
+                    blocking=True,
+                )
             notified.append(target)
         except Exception as err:  # noqa: BLE001 - one bad target must not stop the rest
             _LOGGER.warning("intercom: notify %s failed: %s", target, err)
