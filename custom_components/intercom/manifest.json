@@ -1,7 +1,7 @@
 {
   "domain": "intercom",
   "name": "Intercom",
-  "after_dependencies": ["frontend", "media_player", "notify", "persistent_notification"],
+  "after_dependencies": ["frontend", "lovelace", "media_player", "notify", "persistent_notification"],
   "codeowners": ["@will-roscoe"],
   "config_flow": true,
   "dependencies": ["http", "tts"],
