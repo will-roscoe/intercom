@@ -11,13 +11,13 @@ script:
       - variables:
           # EDIT HERE to add/remove devices.
           speaker_map:
-            input_boolean.bcast_spk_sonos_roam: media_player.sonosroam
-            input_boolean.bcast_spk_lounge_tv: media_player.tv
+            input_boolean.bcast_spk_living: media_player.sonos_living_room
+            input_boolean.bcast_spk_tv: media_player.living_room_tv
           notify_map:
-            input_boolean.bcast_notify_ipad: notify.mobile_app_wills_ipad_air
-            input_boolean.bcast_notify_vega: notify.mobile_app_vega
-            input_boolean.bcast_notify_nikki: notify.mobile_app_nikki_s_phone
-            input_boolean.bcast_notify_lgtv: notify.lg_webos_tv_lk6100plb
+            input_boolean.bcast_notify_phone: notify.mobile_app_phone
+            input_boolean.bcast_notify_tablet: notify.mobile_app_tablet
+            input_boolean.bcast_notify_phone2: notify.mobile_app_phone_2
+            input_boolean.bcast_notify_tv: notify.living_room_tv
             input_boolean.bcast_notify_persistent: notify.persistent_notification
           players: >-
             {% set ns = namespace(items=[]) %}

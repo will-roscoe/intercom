@@ -17,8 +17,8 @@ cards:
     square: false
     cards:
       - type: custom:button-card
-        entity: input_boolean.bcast_spk_sonos_roam
-        name: Sonos Roam
+        entity: input_boolean.bcast_spk_living
+        name: Living Room
         icon: mdi:speaker
         tap_action: { action: toggle }
         styles: { card: [{ height: 64px, border-radius: 12px }] }
@@ -29,8 +29,8 @@ cards:
           - value: "off"
             color: var(--disabled-text-color)
       - type: custom:button-card
-        entity: input_boolean.bcast_spk_lounge_tv
-        name: Lounge TV
+        entity: input_boolean.bcast_spk_tv
+        name: Living Room TV
         icon: mdi:television
         tap_action: { action: toggle }
         styles: { card: [{ height: 64px, border-radius: 12px }] }
@@ -47,8 +47,20 @@ cards:
     square: false
     cards:
       - type: custom:button-card
-        entity: input_boolean.bcast_notify_ipad
-        name: Will's iPad
+        entity: input_boolean.bcast_notify_phone
+        name: My Phone
+        icon: mdi:cellphone
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_tablet
+        name: Tablet
         icon: mdi:tablet
         tap_action: { action: toggle }
         styles: { card: [{ height: 56px, border-radius: 12px }] }
@@ -59,8 +71,8 @@ cards:
           - value: "off"
             color: var(--disabled-text-color)
       - type: custom:button-card
-        entity: input_boolean.bcast_notify_vega
-        name: Vega
+        entity: input_boolean.bcast_notify_phone2
+        name: Phone 2
         icon: mdi:cellphone
         tap_action: { action: toggle }
         styles: { card: [{ height: 56px, border-radius: 12px }] }
@@ -71,20 +83,8 @@ cards:
           - value: "off"
             color: var(--disabled-text-color)
       - type: custom:button-card
-        entity: input_boolean.bcast_notify_nikki
-        name: Nikki's Phone
-        icon: mdi:cellphone
-        tap_action: { action: toggle }
-        styles: { card: [{ height: 56px, border-radius: 12px }] }
-        state:
-          - value: "on"
-            color: var(--primary-color)
-            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
-          - value: "off"
-            color: var(--disabled-text-color)
-      - type: custom:button-card
-        entity: input_boolean.bcast_notify_lgtv
-        name: Lounge TV (screen)
+        entity: input_boolean.bcast_notify_tv
+        name: Living Room TV (screen)
         icon: mdi:television
         tap_action: { action: toggle }
         styles: { card: [{ height: 56px, border-radius: 12px }] }

@@ -1,24 +1,24 @@
 # Primary UI: the bundled custom card.
 # Requires the Intercom integration installed (the card auto-registers).
-# Add a card -> Manual (YAML) -> paste. Adjust entities to your system.
+# Add a card -> Manual (YAML) -> paste. Replace the example entities with your own.
 type: custom:intercom-card
 title: Intercom
 default_volume: 40
 players:
-  - entity: media_player.sonosroam
-    name: Sonos Roam
-  # NB: LG webOS TVs usually cannot play TTS audio (see README limitations).
-  # Kept here as a speaker per preference; also available as an on-screen notify below.
-  - entity: media_player.tv
-    name: Lounge TV
+  - entity: media_player.sonos_living_room
+    name: Living Room
+  # NB: many TVs (e.g. LG webOS) cannot play TTS audio (see README limitations).
+  # Shown here as a speaker; also offered as an on-screen notify below.
+  - entity: media_player.living_room_tv
+    name: Living Room TV
 notify:
-  - service: notify.mobile_app_wills_ipad_air
-    name: Will's iPad
-  - service: notify.mobile_app_vega
-    name: Vega
-  - service: notify.mobile_app_nikki_s_phone
-    name: Nikki's Phone
-  - service: notify.lg_webos_tv_lk6100plb
-    name: Lounge TV (screen)
+  - service: notify.mobile_app_phone
+    name: My Phone
+  - service: notify.mobile_app_tablet
+    name: Tablet
+  - service: notify.mobile_app_phone_2
+    name: Phone 2
+  - service: notify.living_room_tv
+    name: Living Room TV (screen)
   - service: notify.persistent_notification
     name: HA notifications
