@@ -1,0 +1,14 @@
+{
+  "domain": "intercom",
+  "name": "Intercom",
+  "after_dependencies": ["frontend", "media_player", "notify", "persistent_notification"],
+  "codeowners": ["@will-roscoe"],
+  "config_flow": true,
+  "dependencies": ["http", "tts"],
+  "documentation": "https://github.com/will-roscoe/intercom",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/will-roscoe/intercom/issues",
+  "requirements": [],
+  "version": "0.1.0"
+}

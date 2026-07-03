@@ -1,0 +1,68 @@
+broadcast:
+  name: Broadcast
+  description: >-
+    Speak a message over media players (TTS) and/or send it to notify targets.
+    Offline speakers are skipped and reported; volume is optionally set and
+    restored around playback.
+  fields:
+    message:
+      name: Message
+      description: The text to speak and/or notify.
+      required: true
+      example: Dinner is ready
+      selector:
+        text:
+          multiline: true
+    players:
+      name: Players
+      description: Media players to speak the message on.
+      required: false
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: media_player
+    volume:
+      name: Volume
+      description: >-
+        Volume to set on the players for the announcement (0-100%). If omitted,
+        the current volume is used and left unchanged.
+      required: false
+      example: 40
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+    notify:
+      name: Notify targets
+      description: >-
+        Notify services to send the message to, e.g. notify.mobile_app_phone.
+      required: false
+      example: '["notify.mobile_app_phone", "notify.persistent_notification"]'
+      selector:
+        object:
+    title:
+      name: Title
+      description: Notification title. Defaults to the configured title.
+      required: false
+      example: Broadcast
+      selector:
+        text:
+    engine:
+      name: TTS engine
+      description: TTS engine entity to use. Defaults to the configured engine.
+      required: false
+      selector:
+        entity:
+          filter:
+            - domain: tts
+    restore_volume:
+      name: Restore volume
+      description: Restore each player's original volume after the announcement.
+      required: false
+      default: true
+      selector:
+        boolean:

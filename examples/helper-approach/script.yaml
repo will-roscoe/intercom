@@ -1,0 +1,39 @@
+# Thin script that maps helper toggles to entity lists and delegates ALL logic
+# to intercom.broadcast. This is the whole point of the integration: the UI only
+# gathers input; the component does the volume/TTS/notify work.
+script:
+  intercom_broadcast_from_helpers:
+    alias: Intercom (from helpers)
+    icon: mdi:bullhorn
+    mode: single
+    max_exceeded: silent
+    sequence:
+      - variables:
+          # EDIT HERE to add/remove devices.
+          speaker_map:
+            input_boolean.bcast_spk_sonos_roam: media_player.sonosroam
+            input_boolean.bcast_spk_lounge_tv: media_player.tv
+          notify_map:
+            input_boolean.bcast_notify_ipad: notify.mobile_app_wills_ipad_air
+            input_boolean.bcast_notify_vega: notify.mobile_app_vega
+            input_boolean.bcast_notify_nikki: notify.mobile_app_nikki_s_phone
+            input_boolean.bcast_notify_lgtv: notify.lg_webos_tv_lk6100plb
+            input_boolean.bcast_notify_persistent: notify.persistent_notification
+          players: >-
+            {% set ns = namespace(items=[]) %}
+            {% for tog, tgt in speaker_map.items() %}
+              {% if is_state(tog, 'on') %}{% set ns.items = ns.items + [tgt] %}{% endif %}
+            {% endfor %}
+            {{ ns.items }}
+          notifiers: >-
+            {% set ns = namespace(items=[]) %}
+            {% for tog, tgt in notify_map.items() %}
+              {% if is_state(tog, 'on') %}{% set ns.items = ns.items + [tgt] %}{% endif %}
+            {% endfor %}
+            {{ ns.items }}
+      - service: intercom.broadcast
+        data:
+          message: "{{ states('input_text.broadcast_message') }}"
+          volume: "{{ states('input_number.broadcast_volume') | float(40) }}"
+          players: "{{ players }}"
+          notify: "{{ notifiers }}"

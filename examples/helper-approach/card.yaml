@@ -1,0 +1,118 @@
+# Dashboard card for the helper approach. Requires custom:button-card (HACS).
+type: vertical-stack
+cards:
+  - type: markdown
+    content: "## 📢 Intercom"
+  - type: entities
+    show_header_toggle: false
+    entities:
+      - entity: input_text.broadcast_message
+        name: Message
+      - entity: input_number.broadcast_volume
+        name: Volume
+  - type: markdown
+    content: "**Speak on**"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: custom:button-card
+        entity: input_boolean.bcast_spk_sonos_roam
+        name: Sonos Roam
+        icon: mdi:speaker
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 64px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_spk_lounge_tv
+        name: Lounge TV
+        icon: mdi:television
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 64px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+  - type: markdown
+    content: "**Notify**"
+  - type: grid
+    columns: 2
+    square: false
+    cards:
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_ipad
+        name: Will's iPad
+        icon: mdi:tablet
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_vega
+        name: Vega
+        icon: mdi:cellphone
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_nikki
+        name: Nikki's Phone
+        icon: mdi:cellphone
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_lgtv
+        name: Lounge TV (screen)
+        icon: mdi:television
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+      - type: custom:button-card
+        entity: input_boolean.bcast_notify_persistent
+        name: HA notifications
+        icon: mdi:bell
+        tap_action: { action: toggle }
+        styles: { card: [{ height: 56px, border-radius: 12px }] }
+        state:
+          - value: "on"
+            color: var(--primary-color)
+            styles: { card: [{ border: "2px solid var(--primary-color)" }] }
+          - value: "off"
+            color: var(--disabled-text-color)
+  - type: custom:button-card
+    name: 📣 Broadcast
+    icon: mdi:bullhorn
+    tap_action:
+      action: call-service
+      service: script.intercom_broadcast_from_helpers
+    styles:
+      card: [{ height: 60px, border-radius: 12px, background: var(--primary-color) }]
+      name: [{ color: white, font-size: 18px, font-weight: bold }]
+      icon: [{ color: white }]

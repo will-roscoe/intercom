@@ -1,0 +1,26 @@
+# Alternative UI (no custom card): helpers + button-card.
+# Put this in configuration.yaml (or a package). Then use script.yaml + card.yaml.
+input_text:
+  broadcast_message:
+    name: Broadcast message
+    max: 255
+    icon: mdi:message-text
+
+input_number:
+  broadcast_volume:
+    name: Broadcast volume
+    min: 0
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    mode: slider
+    icon: mdi:volume-high
+
+input_boolean:
+  bcast_spk_sonos_roam: { name: Sonos Roam, icon: mdi:speaker }
+  bcast_spk_lounge_tv: { name: Lounge TV, icon: mdi:television }
+  bcast_notify_ipad: { name: Will's iPad Air, icon: mdi:tablet }
+  bcast_notify_vega: { name: Vega, icon: mdi:cellphone }
+  bcast_notify_nikki: { name: Nikki's Phone, icon: mdi:cellphone }
+  bcast_notify_lgtv: { name: Lounge TV (screen), icon: mdi:television }
+  bcast_notify_persistent: { name: HA notifications, icon: mdi:bell }

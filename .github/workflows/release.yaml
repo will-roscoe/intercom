@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check manifest version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(python -c "import json;print(json.load(open('custom_components/intercom/manifest.json'))['version'])")
+          echo "tag=$TAG manifest=$MANIFEST"
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::Tag ($TAG) does not match manifest version ($MANIFEST)"
+            exit 1
+          fi
+
+      - name: Create zip
+        run: |
+          cd custom_components/intercom
+          zip -r ../../intercom.zip .
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: intercom.zip

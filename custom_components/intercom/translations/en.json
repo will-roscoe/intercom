@@ -1,0 +1,66 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Intercom",
+        "description": "Set the defaults used by the intercom.broadcast service. You can override any of these per call.",
+        "data": {
+          "tts_engine": "Default TTS engine",
+          "default_title": "Default notification title",
+          "wait_timeout": "Max seconds to wait for playback"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Intercom is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Intercom options",
+        "data": {
+          "tts_engine": "Default TTS engine",
+          "default_title": "Default notification title",
+          "wait_timeout": "Max seconds to wait for playback"
+        }
+      }
+    }
+  },
+  "services": {
+    "broadcast": {
+      "name": "Broadcast",
+      "description": "Speak a message over media players (TTS) and/or send it to notify targets.",
+      "fields": {
+        "message": {
+          "name": "Message",
+          "description": "The text to speak and/or notify."
+        },
+        "players": {
+          "name": "Players",
+          "description": "Media players to speak the message on."
+        },
+        "volume": {
+          "name": "Volume",
+          "description": "Volume to set for the announcement (0-100%). Omit to leave volume unchanged."
+        },
+        "notify": {
+          "name": "Notify targets",
+          "description": "Notify services to send the message to, e.g. notify.mobile_app_phone."
+        },
+        "title": {
+          "name": "Title",
+          "description": "Notification title. Defaults to the configured title."
+        },
+        "engine": {
+          "name": "TTS engine",
+          "description": "TTS engine entity to use. Defaults to the configured engine."
+        },
+        "restore_volume": {
+          "name": "Restore volume",
+          "description": "Restore each player's original volume after the announcement."
+        }
+      }
+    }
+  }
+}
