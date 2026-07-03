@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- broadcast waves (fan upward from the device) -->
+  <g fill="none" stroke="#2F8BFF" stroke-width="26" stroke-linecap="round">
+    <path d="M163.3,254.5 A100,100 0 0 1 348.7,254.5"/>
+    <path d="M116.9,235.7 A150,150 0 0 1 395.1,235.7"/>
+    <path d="M70.6,217 A200,200 0 0 1 441.4,217"/>
+  </g>
+  <!-- intercom unit -->
+  <rect x="161" y="286" width="190" height="152" rx="36" fill="#3E4C6B"/>
+  <!-- speaker driver -->
+  <circle cx="256" cy="362" r="46" fill="#F2564B"/>
+  <circle cx="256" cy="362" r="18" fill="#3E4C6B"/>
+</svg>
