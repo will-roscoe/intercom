@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import (
@@ -24,6 +23,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.loader import async_get_integration
 import voluptuous as vol
 
 from .const import (
@@ -34,11 +34,9 @@ from .const import (
     ATTR_RESTORE_VOLUME,
     ATTR_TITLE,
     ATTR_VOLUME,
-    CARD_FILENAME,
     CONF_DEFAULT_TITLE,
     CONF_TTS_ENGINE,
     CONF_WAIT_TIMEOUT,
-    DATA_CARD_REGISTERED,
     DEFAULT_TITLE,
     DEFAULT_TTS_ENGINE,
     DEFAULT_WAIT_TIMEOUT,
@@ -46,8 +44,8 @@ from .const import (
     EVENT_RESULT,
     SERVICE_BROADCAST,
     UNAVAILABLE_STATES,
-    URL_BASE,
 )
+from .frontend import async_register_card
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +74,8 @@ BROADCAST_SCHEMA = vol.Schema(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Intercom from a config entry."""
-    await _async_register_card(hass)
+    integration = await async_get_integration(hass, DOMAIN)
+    await async_register_card(hass, str(integration.version))
 
     async def _handle_broadcast(call: ServiceCall) -> ServiceResponse:
         options = {**entry.data, **entry.options}
@@ -308,24 +307,3 @@ async def _async_report_problems(
         },
         blocking=False,
     )
-
-
-async def _async_register_card(hass: HomeAssistant) -> None:
-    """Serve the bundled Lovelace card and register it with the frontend once."""
-    if hass.data.get(DATA_CARD_REGISTERED):
-        return
-
-    # Imported lazily so the integration still loads if the frontend/http
-    # internals move between HA versions.
-    from homeassistant.components.frontend import add_extra_js_url
-    from homeassistant.components.http import StaticPathConfig
-
-    card_path = os.path.join(os.path.dirname(__file__), CARD_FILENAME)
-    card_url = f"{URL_BASE}/{CARD_FILENAME}"
-
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(card_url, card_path, cache_headers=False)]
-    )
-    add_extra_js_url(hass, card_url)
-    hass.data[DATA_CARD_REGISTERED] = True
-    _LOGGER.debug("intercom: registered Lovelace card at %s", card_url)
