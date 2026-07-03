@@ -26,3 +26,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local planning / design docs (kept off the public repo)
+.claude/
