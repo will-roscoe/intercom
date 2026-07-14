@@ -18,10 +18,6 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # 'brands' is only required for the HACS default store; custom-repo
-          # installs don't need it. To submit a real icon later, open a PR at
-          # https://github.com/home-assistant/brands and drop this ignore.
-          ignore: brands
 
   hassfest:
     name: Hassfest
