@@ -6,10 +6,12 @@
  * targets to send it to, then hit Broadcast — it calls the `intercom.broadcast`
  * service and reports, per target, what actually happened.
  *
- * The result comes back as the service *response*, not from the event bus:
- * non-admin users are not allowed to subscribe to custom events, so an
- * event-only card silently never updates for them (and spams the HA log with
- * "Refusing to allow <user> to subscribe to event intercom_broadcast_result").
+ * Results arrive two ways, neither of which needs admin rights: the service
+ * *response* for a broadcast this card sent, and the integration's own
+ * `intercom/subscribe_result` websocket command for broadcasts sent by anyone
+ * else (a phone, an automation, another household member). Home Assistant
+ * refuses to let non-admins subscribe to custom bus events, so an event-only
+ * card silently never updates for them.
  *
  * Config:
  *   type: custom:intercom-card
@@ -50,7 +52,9 @@ class IntercomCard extends HTMLElement {
     this._built = false;
     this._unsub = null;
     this._subscribed = false;
+    this._pending = false;
     this._lastResult = null;
+    this._lastResultReplay = false;
     this._statusText = "";
   }
 
@@ -232,7 +236,8 @@ class IntercomCard extends HTMLElement {
     root.appendChild(card);
     this._built = true;
     this._updateAvailability();
-    if (this._lastResult) this._showResult(this._lastResult, false);
+    if (this._lastResult)
+      this._showResult(this._lastResult, false, this._lastResultReplay);
     else if (this._statusText) this._setStatus(this._statusText);
   }
 
@@ -292,9 +297,9 @@ class IntercomCard extends HTMLElement {
 
   // --- actions ---------------------------------------------------------------
 
-  async _broadcast(overridePlayers) {
+  async _broadcast(overridePlayers, overrideMessage) {
     if (!this._hass) return;
-    const message = (this._message || "").trim();
+    const message = (overrideMessage || this._message || "").trim();
     if (!message) {
       this._setStatus("Type a message first.", "warn");
       return;
@@ -314,6 +319,7 @@ class IntercomCard extends HTMLElement {
     if (this._config.critical) data.critical = true;
 
     this._busy(true);
+    this._pending = true;
     this._setStatus("Broadcasting… (confirming playback)", "busy");
     try {
       // notifyOnError=false: we render the failure ourselves rather than
@@ -343,6 +349,7 @@ class IntercomCard extends HTMLElement {
       const detail = err && (err.message || err.error || err.code);
       this._setStatus(`Failed: ${detail || err}`, "bad");
     } finally {
+      this._pending = false;
       this._busy(false);
     }
   }
@@ -353,29 +360,38 @@ class IntercomCard extends HTMLElement {
 
   _subscribe() {
     if (!this._hass || !this._hass.connection || this._unsub) return;
-    // Only admins may subscribe to custom events; attempting it as a normal
-    // user fails and logs a server-side error on every card load.
-    if (!this._hass.user || !this._hass.user.is_admin) return;
+    // intercom/subscribe_result, not subscribe_events: the latter is admin-only
+    // for custom event types. The integration replays the last broadcast on
+    // subscribe, so the card is not blank on load.
     this._unsub = this._hass.connection
-      .subscribeEvents(
-        (ev) => this._showResult(ev.data, false),
-        "intercom_broadcast_result"
-      )
+      .subscribeMessage((msg) => this._onPushed(msg), {
+        type: "intercom/subscribe_result",
+      })
       .then((fn) => {
         this._subscribed = true;
         return fn;
       })
       .catch(() => {
+        // Integration not loaded, or older than this card.
         this._subscribed = false;
         return null;
       });
   }
 
+  _onPushed(msg) {
+    if (!msg || !msg.result) return;
+    // Do not let a replayed or someone else's broadcast overwrite live feedback
+    // about the one this card is still waiting on.
+    if (this._pending) return;
+    this._showResult(msg.result, false, !!msg.replay);
+  }
+
   // --- result rendering ------------------------------------------------------
 
-  _showResult(result, own) {
+  _showResult(result, own, replay) {
     if (!result) return;
     this._lastResult = result;
+    this._lastResultReplay = !!replay;
     if (!this._statusEl) return;
 
     const complete = !!result.complete;
@@ -383,14 +399,14 @@ class IntercomCard extends HTMLElement {
     const tone = complete ? "good" : delivered ? "warn" : "bad";
 
     this._statusEl.innerHTML = "";
-    this._statusEl.className = `status ${tone}`;
+    this._statusEl.className = `status ${tone}${replay ? " replay" : ""}`;
 
     const head = document.createElement("div");
     head.className = "status-head";
     const icon = complete ? "✓" : delivered ? "!" : "✕";
-    head.textContent = `${icon} ${this._time()} — ${
-      result.summary || (complete ? "delivered" : "not delivered")
-    }`;
+    head.textContent = `${icon} ${replay ? "Last broadcast " : ""}${this._time(
+      result
+    )} — ${result.summary || (complete ? "delivered" : "not delivered")}`;
     this._statusEl.appendChild(head);
 
     const rows = document.createElement("ul");
@@ -417,10 +433,13 @@ class IntercomCard extends HTMLElement {
     }
     if (rows.childElementCount) this._statusEl.appendChild(rows);
 
-    // Anything that did not come out of a speaker is worth one tap to retry.
-    const retryable = (result.players || [])
-      .filter((p) => !OK_STATUSES.has(p.status))
-      .map((p) => p.entity_id);
+    // Anything that did not come out of a speaker is worth one tap to retry —
+    // but not for a broadcast replayed from before this card loaded.
+    const retryable = replay
+      ? []
+      : (result.players || [])
+          .filter((p) => !OK_STATUSES.has(p.status))
+          .map((p) => p.entity_id);
     if (retryable.length) {
       const retry = document.createElement("button");
       retry.className = "retry";
@@ -428,7 +447,9 @@ class IntercomCard extends HTMLElement {
       retry.textContent = `Retry ${retryable.length} speaker${
         retryable.length > 1 ? "s" : ""
       }`;
-      retry.addEventListener("click", () => this._broadcast(retryable));
+      retry.addEventListener("click", () =>
+        this._broadcast(retryable, result.message)
+      );
       this._statusEl.appendChild(retry);
     }
 
@@ -455,8 +476,10 @@ class IntercomCard extends HTMLElement {
     return li;
   }
 
-  _time() {
-    return new Date().toLocaleTimeString([], {
+  _time(result) {
+    const stamp = result && result.finished_at ? new Date(result.finished_at) : null;
+    const when = stamp && !isNaN(stamp.getTime()) ? stamp : new Date();
+    return when.toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
@@ -465,6 +488,7 @@ class IntercomCard extends HTMLElement {
   _setStatus(text, tone) {
     this._statusText = text;
     this._lastResult = null;
+    this._lastResultReplay = false;
     if (!this._statusEl) return;
     this._statusEl.className = `status ${tone || ""}`.trim();
     this._statusEl.textContent = text;
@@ -526,6 +550,7 @@ const STYLES = `
     display: flex; flex-direction: column; gap: 6px;
   }
   .status.busy { font-style: italic; }
+  .status.replay { opacity: 0.7; }
   .status-head { font-weight: 600; }
   .status.good .status-head { color: var(--success-color, #43a047); }
   .status.warn .status-head { color: var(--warning-color, #ff9800); }

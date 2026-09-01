@@ -36,6 +36,9 @@ helpers unless you want to.
 - **Loud about failure** — a `critical: true` broadcast retries harder and raises
   an error if anything did not get through, so an emergency automation cannot
   mistake a half-delivered message for a delivered one.
+- **Works for the whole household** — results reach the card for non-admin users
+  too, via a dedicated websocket subscription rather than the admin-only event
+  bus.
 - **Works with your own UI too** — the service is card-agnostic, so a helper +
   `button-card` dashboard (or an automation) can drive it just as well.
 
@@ -104,12 +107,10 @@ notify:
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
 broadcast. After each broadcast the card lists every target and what happened to
 it, and offers a one-tap **Retry** for any speaker that did not produce sound.
+Broadcasts sent from elsewhere — another household member's phone, an automation
+— show up too, and the last one is replayed when the card loads.
 
-The card reads the result from the *service response*, so it works for non-admin
-users. (Home Assistant only lets admins subscribe to custom events, which is why
-an event-only card silently never updates for other household members — and logs
-`Refusing to allow <user> to subscribe to event intercom_broadcast_result` on
-every load.)
+None of that needs admin rights; see [Non-admin users](#non-admin-users).
 
 A full worked example is in [`examples/lovelace-intercom-card.yaml`](examples/lovelace-intercom-card.yaml).
 
@@ -202,6 +203,43 @@ event) that says what happened to each target individually:
 
 `delivered` is true when at least one target definitely got the message.
 `complete` is true only when *every* requested target did.
+
+### Non-admin users
+
+Everything above works for any signed-in user, admin or not.
+
+That takes a little care, because Home Assistant will not let a non-admin
+subscribe to a custom event. `subscribe_events` checks the event type against a
+hardcoded allowlist in `homeassistant/auth/permissions/events.py` and raises
+`Unauthorized` otherwise, logging:
+
+```
+Refusing to allow Nikki to subscribe to event intercom_broadcast_result
+```
+
+There is no hook to extend that allowlist, so a card built on `subscribe_events`
+silently never updates for anyone who is not an admin — while filling the log
+with that error on every card load.
+
+Rather than widen the event bus, the integration registers one narrow websocket
+command of its own, `intercom/subscribe_result` — the same pattern core uses for
+`persistent_notification/subscribe`. It is deliberately not admin-gated, and a
+subscriber sees intercom broadcast results and nothing else. On subscribe it
+replays the most recent broadcast so a freshly loaded card is not blank.
+
+So results reach the card two ways, neither needing admin:
+
+| Path | Covers |
+| --- | --- |
+| Service response | The broadcast this card just sent. |
+| `intercom/subscribe_result` | Broadcasts sent by anyone else, plus the last one on load. |
+
+The `intercom_broadcast_result` bus event is still fired, unchanged, for
+automations.
+
+> Any signed-in user who subscribes can read the text of every broadcast. For a
+> household intercom that is the point, but it is worth knowing if you share the
+> instance more widely.
 
 ### How playback is confirmed
 

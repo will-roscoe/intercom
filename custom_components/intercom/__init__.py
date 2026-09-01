@@ -66,6 +66,7 @@ from .const import (
     UNAVAILABLE_STATES,
 )
 from .frontend import async_register_card
+from .websocket import async_register_websocket_api, async_store_result
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Intercom from a config entry."""
     integration = await async_get_integration(hass, DOMAIN)
     await async_register_card(hass, str(integration.version))
+    async_register_websocket_api(hass)
 
     async def _handle_broadcast(call: ServiceCall) -> ServiceResponse:
         options = {**entry.data, **entry.options}
@@ -197,6 +199,7 @@ async def _async_broadcast(
     else:
         _LOGGER.info("intercom[%s]: %s", broadcast_id, result["summary"])
 
+    async_store_result(hass, result)
     hass.bus.async_fire(EVENT_RESULT, result)
     await _async_report_problems(hass, result)
 

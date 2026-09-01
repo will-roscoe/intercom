@@ -77,9 +77,15 @@ FEATURE_PLAY_MEDIA: Final = 512
 FEATURE_VOLUME_SET: Final = 4
 FEATURE_VOLUME_MUTE: Final = 8
 
+# Websocket API. Home Assistant only lets admins subscribe to arbitrary bus
+# events, so the card subscribes to this narrow command of ours instead.
+WS_TYPE_SUBSCRIBE_RESULT: Final = f"{DOMAIN}/subscribe_result"
+
 # Frontend card
 URL_BASE: Final = "/intercom"
 CARD_FILENAME: Final = "intercom-card.js"
 
 # Marker in hass.data so we only register static paths / JS once per HA run.
 DATA_CARD_REGISTERED: Final = f"{DOMAIN}_card_registered"
+# Last broadcast result, replayed to a card the moment it subscribes.
+DATA_LAST_RESULT: Final = f"{DOMAIN}_last_result"
