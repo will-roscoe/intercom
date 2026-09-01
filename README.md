@@ -21,12 +21,21 @@ helpers unless you want to.
 - **Bundled Lovelace card** (`custom:intercom-card`) — message box, speaker
   checkboxes, volume slider, notify checkboxes, Broadcast button. Auto-registered;
   no HACS frontend resource to add.
+- **Confirmed playback, not assumed playback** — a speaker is only reported as
+  `played` when Home Assistant actually saw it start playing. "It said it worked
+  but nothing came out" becomes an explicit `unverified` result instead of a
+  silent success.
+- **Every target is independent** — one `tts.speak` call per speaker, so a Sonos
+  that answers *"The command to the player failed."* cannot take the rest of the
+  broadcast down with it. Failed targets are retried.
 - **Volume that behaves** — optionally set a broadcast volume, then restore each
-  speaker's original volume once the message finishes playing.
+  speaker's original volume once the message finishes playing. Muted speakers are
+  unmuted for the announcement and re-muted afterwards.
 - **Sonos-correct** — uses `cache: true`, which Sonos requires (without it Sonos
   silently refuses to play HA's on-demand TTS stream).
-- **Graceful failure** — offline speakers are skipped and reported via a persistent
-  notification and an event; one dead notify target never blocks the others.
+- **Loud about failure** — a `critical: true` broadcast retries harder and raises
+  an error if anything did not get through, so an emergency automation cannot
+  mistake a half-delivered message for a delivered one.
 - **Works with your own UI too** — the service is card-agnostic, so a helper +
   `button-card` dashboard (or an automation) can drive it just as well.
 
@@ -57,7 +66,10 @@ can be overridden per service call:
 | --- | --- | --- |
 | Default TTS engine | `tts.piper` | TTS entity used to speak. |
 | Default notification title | `Broadcast` | Title for notify messages. |
-| Max seconds to wait for playback | `30` | Cap on waiting for speech to finish before restoring volume. |
+| Max seconds to wait for playback | `30` | Cap on a single announcement before it is given up on. |
+| Max seconds to wait for playback to start | `8` | How long a speaker gets to show *any* sign of playing before the result is reported as `unverified`. Sonos needs several seconds to buffer. |
+| Attempts per target | `2` | How many times each speaker or notify target is tried before it is reported as failed. |
+| Unmute muted speakers | on | A muted speaker accepts an announcement and plays it silently; unmuting first (and re-muting after) prevents that. |
 
 ---
 
@@ -87,9 +99,17 @@ notify:
 | `default_volume` | `40` | Initial slider value (0–100). |
 | `show_volume` | `true` | Hide the slider with `false`. |
 | `volume_step` | `5` | Slider step. |
+| `critical` | `false` | Send every broadcast from this card as critical. |
 
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
-broadcast. A status line reports the result of each broadcast.
+broadcast. After each broadcast the card lists every target and what happened to
+it, and offers a one-tap **Retry** for any speaker that did not produce sound.
+
+The card reads the result from the *service response*, so it works for non-admin
+users. (Home Assistant only lets admins subscribe to custom events, which is why
+an event-only card silently never updates for other household members — and logs
+`Refusing to allow <user> to subscribe to event intercom_broadcast_result` on
+every load.)
 
 A full worked example is in [`examples/lovelace-intercom-card.yaml`](examples/lovelace-intercom-card.yaml).
 
@@ -112,6 +132,9 @@ data:
   title: "Kitchen"     # optional
   engine: tts.piper    # optional, overrides the configured engine
   restore_volume: true # optional, default true
+  verify: true         # optional, default true
+  critical: false      # optional, default false
+  max_attempts: 3      # optional, overrides the configured default
 ```
 
 | Field | Required | Description |
@@ -123,19 +146,114 @@ data:
 | `title` | no | Notification title. |
 | `engine` | no | TTS engine entity. |
 | `restore_volume` | no | Restore original volume afterwards (default `true`). |
+| `verify` | no | Confirm playback before reporting a speaker as played (default `true`). |
+| `critical` | no | Retry silent speakers and raise an error unless everything was delivered (default `false`). |
+| `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
 
-The service returns response data and fires an `intercom_broadcast_result` event:
+Calling with no players *and* no notify targets is an error — this service never
+succeeds at doing nothing.
+
+---
+
+## Knowing whether it worked
+
+Every broadcast returns a response (and fires an `intercom_broadcast_result`
+event) that says what happened to each target individually:
 
 ```json
 {
+  "id": "9f3c1a20",
   "message": "Dinner is ready",
-  "spoke": ["media_player.sonosroam"],
-  "offline": [],
-  "notified": ["notify.mobile_app_phone"],
-  "notify_failed": [],
+  "delivered": true,
+  "complete": false,
+  "summary": "partial — played on 1/2 speakers, notified 1/1 targets (Study: the player accepted the command but no playback was detected within 8s)",
+  "duration": 6.4,
+  "players": [
+    { "entity_id": "media_player.sonosroam", "name": "Sonos Roam",
+      "status": "played", "verified": true, "attempts": 1,
+      "error": null, "detail": null, "warnings": [] },
+    { "entity_id": "media_player.study", "name": "Study",
+      "status": "unverified", "verified": false, "attempts": 1,
+      "error": "the player accepted the command but no playback was detected within 8s",
+      "detail": null, "warnings": [] }
+  ],
+  "notify": [
+    { "target": "notify.mobile_app_phone", "status": "sent", "attempts": 1, "error": null }
+  ],
+  "played": ["media_player.sonosroam"],
+  "unverified": ["media_player.study"],
+  "failed": [], "offline": [], "unsupported": [],
+  "notified": ["notify.mobile_app_phone"], "notify_failed": [],
+  "errors": ["Study: the player accepted the command but no playback was detected within 8s"],
   "engine_available": true
 }
 ```
+
+### Speaker statuses
+
+| Status | Meaning |
+| --- | --- |
+| `played` | Home Assistant saw the speaker start playing. This is the only status that means sound came out. |
+| `unverified` | The speaker accepted the command but never showed any sign of playing. This is the "reported as sent, nothing heard" case. |
+| `failed` | The `tts.speak` call itself raised, e.g. Sonos's *"The command to the player failed."* |
+| `offline` | The entity is missing or `unavailable`; nothing was attempted. |
+| `unsupported` | The entity exists but cannot play media at all. |
+| `sent` | Only with `verify: false` — dispatched, delivery not confirmed. |
+
+`delivered` is true when at least one target definitely got the message.
+`complete` is true only when *every* requested target did.
+
+### How playback is confirmed
+
+A state-change listener is armed on each speaker **before** `tts.speak` is
+called, then playback counts as confirmed if the player enters a playing state,
+switches to different media, or (if it was already playing) picks up a new media
+duration. Arming first matters: a short clip can start and finish faster than any
+polling loop would notice.
+
+### Sending something that has to get through
+
+```yaml
+action: intercom.broadcast
+data:
+  message: "Smoke detected in the garage. Leave the house now."
+  players: [media_player.sonosroam, media_player.kitchen]
+  notify: [notify.mobile_app_phone, notify.persistent_notification]
+  volume: 80
+  critical: true
+response_variable: result
+```
+
+With `critical: true` the service:
+
+- retries speakers that produced no sound (a non-critical broadcast does not, to
+  avoid saying a routine message twice);
+- writes a persistent notification listing every target and its failure reason,
+  under a broadcast-specific ID so a later broadcast cannot overwrite the
+  evidence;
+- **raises an error** unless every requested target was delivered, so the calling
+  automation fails visibly rather than continuing as if the message landed.
+
+Pair it with `continue_on_error: false` (the default) and an automation-level
+fallback:
+
+```yaml
+- alias: Emergency broadcast
+  sequence:
+    - action: intercom.broadcast
+      data:
+        message: "{{ text }}"
+        players: [media_player.sonosroam, media_player.kitchen]
+        notify: [notify.mobile_app_phone]
+        critical: true
+    # only reached if everything above got through
+    - action: input_boolean.turn_on
+      target: { entity_id: input_boolean.alert_delivered }
+```
+
+Every broadcast also logs one line under `custom_components.intercom`, tagged
+with the broadcast id, at `INFO` when complete, `WARNING` when partial and
+`ERROR` when nothing was delivered.
 
 ### Driving it from your own UI (helpers + button-card)
 
@@ -149,15 +267,21 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 
 ## Limitations
 
-- **LG webOS (and many other) TVs cannot play TTS audio.** The TV entity reports
-  `available` but `play_media`/`tts.speak` produces no sound, so it can't be
-  reliably auto-detected as "failed". Prefer sending to a TV via its **notify**
-  service (an on-screen toast) instead of as a speaker.
-- **Notify delivery isn't confirmed.** A failed notify *service call* is reported,
-  but Home Assistant can't confirm a push actually reached a phone.
-- **Per-speaker TTS errors aren't isolated.** All available speakers are spoken to
-  in one `tts.speak` call; offline speakers are reported precisely, but a mid-call
-  TTS error is reported at the call level.
+- **Confirmation is state-based, not acoustic.** `played` means the player
+  reported that it started playing the clip. It cannot catch a speaker whose
+  amplifier is off, whose output is routed elsewhere, or that is physically
+  unplugged from its power supply mid-sentence. It does catch the common cases:
+  rejected commands, muted speakers, and players that accept the command and do
+  nothing.
+- **LG webOS (and many other) TVs cannot play TTS audio.** They accept the
+  command and stay silent, so they are reported as `unverified` rather than
+  played. Prefer sending to a TV via its **notify** service (an on-screen toast)
+  instead of as a speaker.
+- **Notify delivery isn't confirmed.** A failed notify *service call* is reported
+  and retried, but Home Assistant cannot confirm a push actually reached a phone.
+  Treat `sent` as "handed to the notification platform".
+- **A speaker in a group may play on its coordinator.** Multi-room groups are
+  reported per entity; the audio may come out of the group instead.
 
 ---
 

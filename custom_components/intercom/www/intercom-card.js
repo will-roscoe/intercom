@@ -4,13 +4,19 @@
  * A self-contained Lovelace card for the `intercom` integration. Type a message,
  * tick which speakers to speak it on (with an optional volume) and which notify
  * targets to send it to, then hit Broadcast — it calls the `intercom.broadcast`
- * service. No helpers required.
+ * service and reports, per target, what actually happened.
+ *
+ * The result comes back as the service *response*, not from the event bus:
+ * non-admin users are not allowed to subscribe to custom events, so an
+ * event-only card silently never updates for them (and spams the HA log with
+ * "Refusing to allow <user> to subscribe to event intercom_broadcast_result").
  *
  * Config:
  *   type: custom:intercom-card
  *   title: Intercom            # optional card header
- *   default_volume: 40         # optional, 0-100; omit `show_volume: false` to hide slider
+ *   default_volume: 40         # optional, 0-100; set `show_volume: false` to hide slider
  *   show_volume: true          # optional
+ *   critical: false            # optional; retry harder and fail loudly
  *   players:                   # optional; auto-discovers media_player.* if omitted
  *     - entity: media_player.sonosroam
  *       name: Sonos Roam
@@ -19,7 +25,18 @@
  *       name: My Phone
  */
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
+
+// Per-target statuses returned by intercom.broadcast.
+const OK_STATUSES = new Set(["played", "sent"]);
+const STATUS_TEXT = {
+  played: "played",
+  sent: "sent",
+  unverified: "no sound detected",
+  failed: "failed",
+  offline: "offline",
+  unsupported: "cannot play media",
+};
 
 class IntercomCard extends HTMLElement {
   constructor() {
@@ -32,7 +49,9 @@ class IntercomCard extends HTMLElement {
     this._volume = 40;
     this._built = false;
     this._unsub = null;
-    this._status = "";
+    this._subscribed = false;
+    this._lastResult = null;
+    this._statusText = "";
   }
 
   static getStubConfig() {
@@ -146,6 +165,7 @@ class IntercomCard extends HTMLElement {
     msg.className = "message";
     msg.placeholder = "Type a message to broadcast…";
     msg.rows = 2;
+    msg.value = this._message || "";
     msg.addEventListener("input", (e) => (this._message = e.target.value));
     this._msgEl = msg;
     content.appendChild(this._field("Message", msg));
@@ -199,19 +219,21 @@ class IntercomCard extends HTMLElement {
     const btn = document.createElement("button");
     btn.className = "broadcast";
     btn.innerHTML = `<span class="mdi">📣</span> Broadcast`;
-    btn.addEventListener("click", () => this._broadcast(btn));
+    btn.addEventListener("click", () => this._broadcast());
+    this._btn = btn;
     content.appendChild(btn);
 
     // status
     this._statusEl = document.createElement("div");
     this._statusEl.className = "status";
-    this._statusEl.textContent = this._status;
     content.appendChild(this._statusEl);
 
     card.appendChild(content);
     root.appendChild(card);
     this._built = true;
     this._updateAvailability();
+    if (this._lastResult) this._showResult(this._lastResult, false);
+    else if (this._statusText) this._setStatus(this._statusText);
   }
 
   _field(label, el) {
@@ -270,66 +292,182 @@ class IntercomCard extends HTMLElement {
 
   // --- actions ---------------------------------------------------------------
 
-  async _broadcast(btn) {
+  async _broadcast(overridePlayers) {
     if (!this._hass) return;
     const message = (this._message || "").trim();
     if (!message) {
-      this._setStatus("Type a message first.");
+      this._setStatus("Type a message first.", "warn");
       return;
     }
-    if (!this._selectedPlayers.size && !this._selectedNotify.size) {
-      this._setStatus("Pick at least one speaker or notify target.");
+    const players = overridePlayers || [...this._selectedPlayers];
+    const notifyTargets = overridePlayers ? [] : [...this._selectedNotify];
+    if (!players.length && !notifyTargets.length) {
+      this._setStatus("Pick at least one speaker or notify target.", "warn");
       return;
     }
 
     const data = { message };
-    if (this._selectedPlayers.size) data.players = [...this._selectedPlayers];
-    if (this._selectedNotify.size) data.notify = [...this._selectedNotify];
-    if (this._config.show_volume !== false && this._selectedPlayers.size)
+    if (players.length) data.players = players;
+    if (notifyTargets.length) data.notify = notifyTargets;
+    if (this._config.show_volume !== false && players.length)
       data.volume = this._volume;
+    if (this._config.critical) data.critical = true;
 
-    btn.disabled = true;
-    this._setStatus("Broadcasting…");
+    this._busy(true);
+    this._setStatus("Broadcasting… (confirming playback)", "busy");
     try {
-      await this._hass.callService("intercom", "broadcast", data);
+      // notifyOnError=false: we render the failure ourselves rather than
+      // letting the frontend pop a toast that hides the detail.
+      const res = await this._hass.callService(
+        "intercom",
+        "broadcast",
+        data,
+        undefined,
+        false,
+        true
+      );
+      const result = res && res.response;
+      if (result) {
+        this._showResult(result, true);
+      } else {
+        // Older frontends do not return service responses; fall back to the
+        // event, or to an honest "we cannot confirm" if we cannot hear it.
+        this._setStatus(
+          this._subscribed
+            ? "Broadcasting… awaiting result"
+            : "Sent, but this Home Assistant cannot report the result here.",
+          "warn"
+        );
+      }
     } catch (err) {
-      this._setStatus(`Error: ${err && err.message ? err.message : err}`);
+      const detail = err && (err.message || err.error || err.code);
+      this._setStatus(`Failed: ${detail || err}`, "bad");
     } finally {
-      btn.disabled = false;
+      this._busy(false);
     }
+  }
+
+  _busy(on) {
+    if (this._btn) this._btn.disabled = !!on;
   }
 
   _subscribe() {
     if (!this._hass || !this._hass.connection || this._unsub) return;
-    this._unsub = this._hass.connection.subscribeEvents(
-      (ev) => this._onResult(ev.data),
-      "intercom_broadcast_result"
-    );
+    // Only admins may subscribe to custom events; attempting it as a normal
+    // user fails and logs a server-side error on every card load.
+    if (!this._hass.user || !this._hass.user.is_admin) return;
+    this._unsub = this._hass.connection
+      .subscribeEvents(
+        (ev) => this._showResult(ev.data, false),
+        "intercom_broadcast_result"
+      )
+      .then((fn) => {
+        this._subscribed = true;
+        return fn;
+      })
+      .catch(() => {
+        this._subscribed = false;
+        return null;
+      });
   }
 
-  _onResult(result) {
+  // --- result rendering ------------------------------------------------------
+
+  _showResult(result, own) {
     if (!result) return;
-    const clean = (list, prefix) =>
-      (list || []).map((x) => x.replace(prefix, "")).join(", ");
-    const parts = [];
-    if (result.spoke && result.spoke.length)
-      parts.push(`spoke on ${clean(result.spoke, "media_player.")}`);
-    if (result.offline && result.offline.length)
-      parts.push(`offline: ${clean(result.offline, "media_player.")}`);
-    if (result.notified && result.notified.length)
-      parts.push(`notified ${clean(result.notified, "notify.")}`);
-    if (result.notify_failed && result.notify_failed.length)
-      parts.push(`notify failed: ${clean(result.notify_failed, "notify.")}`);
-    const now = new Date().toLocaleTimeString([], {
+    this._lastResult = result;
+    if (!this._statusEl) return;
+
+    const complete = !!result.complete;
+    const delivered = !!result.delivered;
+    const tone = complete ? "good" : delivered ? "warn" : "bad";
+
+    this._statusEl.innerHTML = "";
+    this._statusEl.className = `status ${tone}`;
+
+    const head = document.createElement("div");
+    head.className = "status-head";
+    const icon = complete ? "✓" : delivered ? "!" : "✕";
+    head.textContent = `${icon} ${this._time()} — ${
+      result.summary || (complete ? "delivered" : "not delivered")
+    }`;
+    this._statusEl.appendChild(head);
+
+    const rows = document.createElement("ul");
+    rows.className = "status-rows";
+    for (const p of result.players || []) {
+      rows.appendChild(
+        this._row(
+          p.name || p.entity_id,
+          p.status,
+          p.error || p.detail,
+          OK_STATUSES.has(p.status)
+        )
+      );
+    }
+    for (const n of result.notify || []) {
+      rows.appendChild(
+        this._row(
+          String(n.target).replace(/^notify\./, ""),
+          n.status,
+          n.error,
+          n.status === "sent"
+        )
+      );
+    }
+    if (rows.childElementCount) this._statusEl.appendChild(rows);
+
+    // Anything that did not come out of a speaker is worth one tap to retry.
+    const retryable = (result.players || [])
+      .filter((p) => !OK_STATUSES.has(p.status))
+      .map((p) => p.entity_id);
+    if (retryable.length) {
+      const retry = document.createElement("button");
+      retry.className = "retry";
+      retry.type = "button";
+      retry.textContent = `Retry ${retryable.length} speaker${
+        retryable.length > 1 ? "s" : ""
+      }`;
+      retry.addEventListener("click", () => this._broadcast(retryable));
+      this._statusEl.appendChild(retry);
+    }
+
+    // Broadcasts fired elsewhere (automations) also land here for admins;
+    // only clear the box for a message this card actually sent.
+    if (own && complete && this._msgEl) {
+      this._message = "";
+      this._msgEl.value = "";
+    }
+  }
+
+  _row(label, status, detail, ok) {
+    const li = document.createElement("li");
+    li.className = ok ? "ok" : "bad";
+    const name = document.createElement("span");
+    name.className = "row-name";
+    name.textContent = label;
+    const state = document.createElement("span");
+    state.className = "row-state";
+    state.textContent = STATUS_TEXT[status] || status;
+    li.appendChild(name);
+    li.appendChild(state);
+    if (detail) li.title = detail;
+    return li;
+  }
+
+  _time() {
+    return new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
-    this._setStatus(`${now} — ${parts.join(" · ") || "done"}`);
   }
 
-  _setStatus(text) {
-    this._status = text;
-    if (this._statusEl) this._statusEl.textContent = text;
+  _setStatus(text, tone) {
+    this._statusText = text;
+    this._lastResult = null;
+    if (!this._statusEl) return;
+    this._statusEl.className = `status ${tone || ""}`.trim();
+    this._statusEl.textContent = text;
   }
 }
 
@@ -385,7 +523,29 @@ const STYLES = `
   button.broadcast .mdi { margin-right: 6px; }
   .status {
     min-height: 1.2em; font-size: 0.85rem; color: var(--secondary-text-color);
-    font-style: italic;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .status.busy { font-style: italic; }
+  .status-head { font-weight: 600; }
+  .status.good .status-head { color: var(--success-color, #43a047); }
+  .status.warn .status-head { color: var(--warning-color, #ff9800); }
+  .status.bad .status-head { color: var(--error-color, #db4437); }
+  .status.warn, .status.bad { color: var(--primary-text-color); }
+  .status-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .status-rows li {
+    display: flex; justify-content: space-between; gap: 10px;
+    padding: 2px 0; border-bottom: 1px solid var(--divider-color);
+  }
+  .status-rows li:last-child { border-bottom: none; }
+  .row-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-state { flex: none; font-variant-numeric: tabular-nums; }
+  .status-rows li.ok .row-state { color: var(--success-color, #43a047); }
+  .status-rows li.bad .row-state { color: var(--error-color, #db4437); font-weight: 600; }
+  button.retry {
+    align-self: flex-start; padding: 8px 14px; border-radius: 10px; cursor: pointer;
+    font: inherit; font-weight: 600;
+    color: var(--primary-color); background: transparent;
+    border: 2px solid var(--primary-color);
   }
 `;
 
