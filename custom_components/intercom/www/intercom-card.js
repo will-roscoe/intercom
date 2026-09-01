@@ -35,6 +35,7 @@ const STATUS_TEXT = {
   played: "played",
   sent: "sent",
   unverified: "no sound detected",
+  silent: "muted — not audible",
   failed: "failed",
   offline: "offline",
   unsupported: "cannot play media",

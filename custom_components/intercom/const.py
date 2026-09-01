@@ -27,6 +27,9 @@ DEFAULT_UNMUTE: Final = True
 
 # Delay after setting volume so the level is applied before audio starts.
 VOLUME_SETTLE_SECONDS: Final = 0.4
+# Volume a critical broadcast raises a silent speaker to when the caller gave no
+# volume of its own. An emergency message at volume zero is not a message.
+CRITICAL_MIN_VOLUME: Final = 30.0
 
 # Service
 SERVICE_BROADCAST: Final = "broadcast"
@@ -60,6 +63,10 @@ STATUS_FAILED: Final = "failed"
 STATUS_OFFLINE: Final = "offline"
 # Entity exists but cannot play media at all.
 STATUS_UNSUPPORTED: Final = "unsupported"
+# The clip played, but into a muted speaker or one at zero volume, so nobody
+# could have heard it. A muted player reports a perfectly successful
+# announcement, which is exactly the kind of lie this integration exists to stop.
+STATUS_SILENT: Final = "silent"
 # Notify target delivered / not delivered.
 STATUS_SENT: Final = "sent"
 

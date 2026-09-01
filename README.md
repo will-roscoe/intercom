@@ -72,7 +72,7 @@ can be overridden per service call:
 | Max seconds to wait for playback | `30` | Cap on a single announcement before it is given up on. |
 | Max seconds to wait for playback to start | `8` | How long a speaker gets to show *any* sign of playing before the result is reported as `unverified`. Sonos needs several seconds to buffer. |
 | Attempts per target | `2` | How many times each speaker or notify target is tried before it is reported as failed. |
-| Unmute muted speakers | on | A muted speaker accepts an announcement and plays it silently; unmuting first (and re-muting after) prevents that. |
+| Unmute muted speakers | on | A muted speaker accepts an announcement and plays it silently; unmuting first (and re-muting after) prevents that. Switching it off does not hide the problem — such a speaker is reported `silent`. A `critical` broadcast unmutes regardless. |
 
 ---
 
@@ -196,6 +196,7 @@ event) that says what happened to each target individually:
 | --- | --- |
 | `played` | Home Assistant saw the speaker start playing. This is the only status that means sound came out. |
 | `unverified` | The speaker accepted the command but never showed any sign of playing. This is the "reported as sent, nothing heard" case. |
+| `silent` | The clip played, but into a muted speaker or one at zero volume, so nobody could have heard it. |
 | `failed` | The `tts.speak` call itself raised, e.g. Sonos's *"The command to the player failed."* |
 | `offline` | The entity is missing or `unavailable`; nothing was attempted. |
 | `unsupported` | The entity exists but cannot play media at all. |
@@ -240,6 +241,23 @@ automations.
 > Any signed-in user who subscribes can read the text of every broadcast. For a
 > household intercom that is the point, but it is worth knowing if you share the
 > instance more widely.
+
+### Muted and silenced speakers
+
+A muted speaker is the most misleading failure of all: it accepts the
+announcement, reports `playing`, finishes on time, and emits nothing. So by
+default the integration unmutes a muted speaker for the announcement and
+re-mutes it afterwards, leaving it exactly as it was found.
+
+If unmuting is switched off in the options, a muted speaker is reported `silent`
+rather than `played` — the message is never quietly counted as delivered. The
+same applies to a speaker sitting at zero volume, which unmuting cannot fix.
+
+**`critical: true` overrides both.** It unmutes regardless of the option, and
+raises a speaker at zero volume to an audible level (restoring it afterwards
+like any other volume change). The speaker somebody muted is exactly the one an
+emergency still has to come out of. Pass an explicit `volume:` if you want to
+choose the level yourself.
 
 ### How playback is confirmed
 
@@ -306,11 +324,11 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 ## Limitations
 
 - **Confirmation is state-based, not acoustic.** `played` means the player
-  reported that it started playing the clip. It cannot catch a speaker whose
-  amplifier is off, whose output is routed elsewhere, or that is physically
-  unplugged from its power supply mid-sentence. It does catch the common cases:
-  rejected commands, muted speakers, and players that accept the command and do
-  nothing.
+  reported that it started playing the clip, and that it was neither muted nor
+  at zero volume. It cannot catch a speaker whose amplifier is off, whose output
+  is routed elsewhere, or that is physically unplugged mid-sentence. It does
+  catch the common cases: rejected commands, muted or silenced speakers, and
+  players that accept the command and do nothing.
 - **LG webOS (and many other) TVs cannot play TTS audio.** They accept the
   command and stay silent, so they are reported as `unverified` rather than
   played. Prefer sending to a TV via its **notify** service (an on-screen toast)
@@ -329,6 +347,19 @@ When `cache` is off, Home Assistant hands the speaker a synthesis-on-demand stre
 URL with no `Content-Length`. Sonos accepts the play command (so it looks like it
 worked) but silently plays nothing. With `cache: true`, Piper renders the whole
 clip to a stable cached file the speaker will play. This integration always sets it.
+
+---
+
+## Development
+
+```bash
+pip install pytest pyyaml voluptuous
+pytest
+```
+
+Home Assistant is not a dependency of this repository; `tests/stubs` provides the
+slice of it the integration imports, so the tests drive the real modules without
+a full HA install. See [`tests/README.md`](tests/README.md).
 
 ---
 

@@ -18,7 +18,7 @@ Three things make that possible:
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from typing import Any
 from uuid import uuid4
@@ -28,6 +28,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CRITICAL_MIN_VOLUME,
     DELIVERED_STATUSES,
     FEATURE_PLAY_MEDIA,
     FEATURE_VOLUME_MUTE,
@@ -37,6 +38,7 @@ from .const import (
     STATUS_OFFLINE,
     STATUS_PLAYED,
     STATUS_SENT,
+    STATUS_SILENT,
     STATUS_UNSUPPORTED,
     STATUS_UNVERIFIED,
     UNAVAILABLE_STATES,
@@ -66,6 +68,15 @@ class BroadcastRequest:
     max_attempts: int
     wait_timeout: float
     start_timeout: float
+
+
+@dataclass
+class _Preparation:
+    """What we changed on a player, and whether it can be heard at all."""
+
+    restore: dict[str, Any] = field(default_factory=dict)
+    # Set when the speaker is known to be inaudible (muted, or volume zero).
+    silent_reason: str | None = None
 
 
 # --- playback verification ----------------------------------------------------
@@ -239,43 +250,59 @@ async def _async_prepare_player(
     state: State,
     features: int,
     outcome: dict[str, Any],
-) -> dict[str, Any]:
-    """Unmute and set volume. Returns the attributes to put back afterwards."""
-    restore: dict[str, Any] = {}
+) -> _Preparation:
+    """Unmute, set volume, and work out whether anything will be audible.
 
-    # A muted speaker is the classic "it said it played but I heard nothing".
-    if (
-        request.unmute
-        and features & FEATURE_VOLUME_MUTE
-        and state.attributes.get("is_volume_muted")
-    ):
+    A muted speaker accepts an announcement, reports playing, and emits nothing,
+    so knowing the level we are about to play into is part of not lying about the
+    result.
+    """
+    prep = _Preparation()
+
+    muted = bool(state.attributes.get("is_volume_muted"))
+    # A critical message overrides the unmute preference. The speaker somebody
+    # muted is exactly the one an emergency still has to come out of.
+    may_unmute = request.unmute or request.critical
+    if muted and may_unmute and features & FEATURE_VOLUME_MUTE:
         if request.restore_volume:
-            restore["is_volume_muted"] = True
-        await _async_player_service(
+            prep.restore["is_volume_muted"] = True
+        if await _async_player_service(
             hass,
             "volume_mute",
             {"entity_id": entity_id, "is_volume_muted": False},
             outcome,
-        )
-
-    if request.volume is None:
-        return restore
-
-    if not features & FEATURE_VOLUME_SET:
-        outcome["warnings"].append("player does not support setting volume")
-        return restore
+        ):
+            muted = False
+    if muted:
+        prep.silent_reason = "the player is muted"
 
     level = state.attributes.get("volume_level")
-    if request.restore_volume and level is not None:
-        restore["volume_level"] = float(level)
-    if await _async_player_service(
-        hass,
-        "volume_set",
-        {"entity_id": entity_id, "volume_level": round(request.volume / 100, 3)},
-        outcome,
-    ):
-        await asyncio.sleep(VOLUME_SETTLE_SECONDS)
-    return restore
+    effective = float(level) if level is not None else None
+
+    volume = request.volume
+    if volume is None and request.critical and effective is not None and effective <= 0:
+        volume = CRITICAL_MIN_VOLUME
+
+    if volume is not None:
+        if features & FEATURE_VOLUME_SET:
+            if request.restore_volume and level is not None:
+                prep.restore["volume_level"] = float(level)
+            target = round(volume / 100, 3)
+            if await _async_player_service(
+                hass,
+                "volume_set",
+                {"entity_id": entity_id, "volume_level": target},
+                outcome,
+            ):
+                effective = target
+                await asyncio.sleep(VOLUME_SETTLE_SECONDS)
+        else:
+            outcome["warnings"].append("player does not support setting volume")
+
+    if prep.silent_reason is None and effective is not None and effective <= 0:
+        prep.silent_reason = "the player's volume is 0"
+
+    return prep
 
 
 async def _async_restore_player(
@@ -348,7 +375,7 @@ async def _async_speak_on_player(
             return outcome
 
         outcome["error"] = None
-        restore = await _async_prepare_player(
+        prep = await _async_prepare_player(
             hass, request, entity_id, state, features, outcome
         )
         watch = _PlaybackWatch(hass, entity_id)
@@ -381,9 +408,10 @@ async def _async_speak_on_player(
                 outcome["error"] = _error_text(err)
             else:
                 await _async_confirm_playback(request, watch, outcome)
+                _apply_silence(prep, outcome)
         finally:
             watch.disarm()
-            await _async_restore_player(hass, entity_id, restore, outcome)
+            await _async_restore_player(hass, entity_id, prep.restore, outcome)
 
         if outcome["status"] in DELIVERED_STATUSES:
             return outcome
@@ -393,6 +421,20 @@ async def _async_speak_on_player(
             break
 
     return outcome
+
+
+def _apply_silence(prep: _Preparation, outcome: dict[str, Any]) -> None:
+    """Downgrade a "played" that nobody could possibly have heard."""
+    if prep.silent_reason is None:
+        return
+    if outcome["status"] in (STATUS_PLAYED, STATUS_SENT):
+        outcome["status"] = STATUS_SILENT
+        outcome["verified"] = False
+        outcome["error"] = (
+            f"the clip played but {prep.silent_reason}, so nothing was audible"
+        )
+    elif not outcome["detail"]:
+        outcome["detail"] = f"note: {prep.silent_reason}"
 
 
 async def _async_confirm_playback(
@@ -567,6 +609,7 @@ def build_result(
     failed = by_status.get(STATUS_FAILED, [])
     offline = by_status.get(STATUS_OFFLINE, [])
     unsupported = by_status.get(STATUS_UNSUPPORTED, [])
+    silent = by_status.get(STATUS_SILENT, [])
 
     notified = [o["target"] for o in notify_outcomes if o["status"] == STATUS_SENT]
     notify_failed = [o["target"] for o in notify_outcomes if o["status"] != STATUS_SENT]
@@ -611,6 +654,7 @@ def build_result(
         "failed": failed,
         "offline": offline,
         "unsupported": unsupported,
+        "silent": silent,
         "notified": notified,
         "notify_failed": notify_failed,
         "errors": errors,
