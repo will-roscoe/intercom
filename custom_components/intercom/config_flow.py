@@ -15,10 +15,16 @@ import voluptuous as vol
 
 from .const import (
     CONF_DEFAULT_TITLE,
+    CONF_MAX_ATTEMPTS,
+    CONF_START_TIMEOUT,
     CONF_TTS_ENGINE,
+    CONF_UNMUTE,
     CONF_WAIT_TIMEOUT,
+    DEFAULT_MAX_ATTEMPTS,
+    DEFAULT_START_TIMEOUT,
     DEFAULT_TITLE,
     DEFAULT_TTS_ENGINE,
+    DEFAULT_UNMUTE,
     DEFAULT_WAIT_TIMEOUT,
     DOMAIN,
 )
@@ -44,6 +50,24 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
                     min=5, max=120, step=1, unit_of_measurement="s", mode="box"
                 )
             ),
+            vol.Optional(
+                CONF_START_TIMEOUT,
+                default=defaults.get(CONF_START_TIMEOUT, DEFAULT_START_TIMEOUT),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=60, step=1, unit_of_measurement="s", mode="box"
+                )
+            ),
+            vol.Optional(
+                CONF_MAX_ATTEMPTS,
+                default=defaults.get(CONF_MAX_ATTEMPTS, DEFAULT_MAX_ATTEMPTS),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=1, max=5, step=1, mode="box")
+            ),
+            vol.Optional(
+                CONF_UNMUTE,
+                default=defaults.get(CONF_UNMUTE, DEFAULT_UNMUTE),
+            ): selector.BooleanSelector(),
         }
     )
 

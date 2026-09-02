@@ -3,11 +3,20 @@
     "step": {
       "user": {
         "title": "Intercom",
-        "description": "Set the defaults used by the intercom.broadcast service. You can override any of these per call.",
+        "description": "Set the defaults used by the intercom.broadcast service. You can override most of these per call.",
         "data": {
           "tts_engine": "Default TTS engine",
           "default_title": "Default notification title",
-          "wait_timeout": "Max seconds to wait for playback"
+          "wait_timeout": "Max seconds to wait for playback",
+          "start_timeout": "Max seconds to wait for playback to start",
+          "max_attempts": "Attempts per target",
+          "unmute": "Unmute muted speakers for announcements"
+        },
+        "data_description": {
+          "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
+          "start_timeout": "How long to wait for a speaker to show any sign of playing before reporting that nothing was heard. Sonos needs several seconds to buffer.",
+          "max_attempts": "How many times each speaker or notify target is tried before it is reported as failed.",
+          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that."
         }
       }
     },
@@ -22,7 +31,16 @@
         "data": {
           "tts_engine": "Default TTS engine",
           "default_title": "Default notification title",
-          "wait_timeout": "Max seconds to wait for playback"
+          "wait_timeout": "Max seconds to wait for playback",
+          "start_timeout": "Max seconds to wait for playback to start",
+          "max_attempts": "Attempts per target",
+          "unmute": "Unmute muted speakers for announcements"
+        },
+        "data_description": {
+          "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
+          "start_timeout": "How long to wait for a speaker to show any sign of playing before reporting that nothing was heard. Sonos needs several seconds to buffer.",
+          "max_attempts": "How many times each speaker or notify target is tried before it is reported as failed.",
+          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that."
         }
       }
     }
@@ -30,7 +48,7 @@
   "services": {
     "broadcast": {
       "name": "Broadcast",
-      "description": "Speak a message over media players (TTS) and/or send it to notify targets.",
+      "description": "Speak a message over media players (TTS) and/or send it to notify targets, and report what was actually played.",
       "fields": {
         "message": {
           "name": "Message",
@@ -59,6 +77,18 @@
         "restore_volume": {
           "name": "Restore volume",
           "description": "Restore each player's original volume after the announcement."
+        },
+        "verify": {
+          "name": "Confirm playback",
+          "description": "Wait for evidence that each speaker really started playing before reporting it as played."
+        },
+        "critical": {
+          "name": "Critical",
+          "description": "Retry speakers that produced no sound and raise an error if any target was not delivered."
+        },
+        "max_attempts": {
+          "name": "Max attempts",
+          "description": "How many times to try each target before giving up."
         }
       }
     }

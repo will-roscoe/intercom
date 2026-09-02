@@ -2,8 +2,8 @@ broadcast:
   name: Broadcast
   description: >-
     Speak a message over media players (TTS) and/or send it to notify targets.
-    Offline speakers are skipped and reported; volume is optionally set and
-    restored around playback.
+    Each target is attempted independently and playback is confirmed against the
+    player's state, so the response says what was actually heard where.
   fields:
     message:
       name: Message
@@ -66,3 +66,37 @@ broadcast:
       default: true
       selector:
         boolean:
+    verify:
+      name: Confirm playback
+      description: >-
+        Wait for evidence that each speaker really started playing before
+        reporting it as played. Turn this off only for players that never report
+        their transport state - the response can then no longer be trusted.
+      required: false
+      default: true
+      selector:
+        boolean:
+    critical:
+      name: Critical
+      description: >-
+        Treat this as a message that must get through. Speakers that accepted the
+        command but produced no sound are retried, and the service raises an
+        error if any requested target was not delivered, so the calling
+        automation fails loudly instead of assuming success.
+      required: false
+      default: false
+      selector:
+        boolean:
+    max_attempts:
+      name: Max attempts
+      description: >-
+        How many times to try each target before giving up. Overrides the
+        configured default.
+      required: false
+      example: 3
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+          mode: box
