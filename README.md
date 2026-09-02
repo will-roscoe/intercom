@@ -361,6 +361,22 @@ Home Assistant is not a dependency of this repository; `tests/stubs` provides th
 slice of it the integration imports, so the tests drive the real modules without
 a full HA install. See [`tests/README.md`](tests/README.md).
 
+### Releasing
+
+`manifest.json` is the source of truth. Bump `version` in a pull request, and
+merging it to `main` publishes the release — the workflow creates the tag, zips
+`custom_components/intercom`, and attaches it with generated notes. Pushing a
+`v*` tag by hand still works and must match the manifest.
+
+Two details worth knowing if you change it:
+
+- The tag is created *by* the release job rather than pushed separately. A tag
+  pushed with `GITHUB_TOKEN` does not trigger other workflows, so a
+  "tag now, release on the tag" chain would silently never fire.
+- The job re-runs lint and tests before publishing, so an automated release
+  cannot ship code the checks reject. It also no-ops when a release for the
+  current version already exists, making it safe on every push to `main`.
+
 ---
 
 ## License
