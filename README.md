@@ -32,7 +32,9 @@ helpers unless you want to.
   speaker's original volume once the message finishes playing. Muted speakers are
   unmuted for the announcement and re-muted afterwards.
 - **Sonos-correct** — uses `cache: true`, which Sonos requires (without it Sonos
-  silently refuses to play HA's on-demand TTS stream).
+  silently refuses to play HA's on-demand TTS stream), and confirms Sonos
+  announcements from the speaker's own clip status, including through Music
+  Assistant.
 - **Loud about failure** — a `critical: true` broadcast retries harder and raises
   an error if anything did not get through, so an emergency automation cannot
   mistake a half-delivered message for a delivered one.
@@ -171,10 +173,11 @@ event) that says what happened to each target individually:
   "duration": 6.4,
   "players": [
     { "entity_id": "media_player.sonosroam", "name": "Sonos Roam",
-      "status": "played", "verified": true, "attempts": 1,
-      "error": null, "detail": null, "warnings": [] },
+      "status": "played", "verified": true, "verified_by": "sonos_clip",
+      "attempts": 1, "error": null, "detail": null, "warnings": [] },
     { "entity_id": "media_player.study", "name": "Study",
-      "status": "unverified", "verified": false, "attempts": 1,
+      "status": "unverified", "verified": false, "verified_by": "state",
+      "attempts": 1,
       "error": "the player accepted the command but no playback was detected within 8s",
       "detail": null, "warnings": [] }
   ],
@@ -197,7 +200,7 @@ event) that says what happened to each target individually:
 | `played` | Home Assistant saw the speaker start playing. This is the only status that means sound came out. |
 | `unverified` | The speaker accepted the command but never showed any sign of playing. This is the "reported as sent, nothing heard" case. |
 | `silent` | The clip played, but into a muted speaker or one at zero volume, so nobody could have heard it. |
-| `failed` | The `tts.speak` call itself raised, e.g. Sonos's *"The command to the player failed."* |
+| `failed` | The `tts.speak` call itself raised (e.g. Sonos's *"The command to the player failed."*), or the speaker reported that it could not play the clip. |
 | `offline` | The entity is missing or `unavailable`; nothing was attempted. |
 | `unsupported` | The entity exists but cannot play media at all. |
 | `sent` | Only with `verify: false` — dispatched, delivery not confirmed. |
@@ -261,11 +264,27 @@ choose the level yourself.
 
 ### How playback is confirmed
 
-A state-change listener is armed on each speaker **before** `tts.speak` is
-called, then playback counts as confirmed if the player enters a playing state,
-switches to different media, or (if it was already playing) picks up a new media
-duration. Arming first matters: a short clip can start and finish faster than any
-polling loop would notice.
+Each speaker gets the most specific check available for it, armed **before**
+`tts.speak` is called (a short clip can start and finish faster than any polling
+loop would notice). The check used is reported per speaker as `verified_by`.
+
+| `verified_by` | Used for | Evidence |
+| --- | --- | --- |
+| `sonos_clip` | Sonos speakers from HA's Sonos integration, and Music Assistant players backed by them | The speaker's own audio-clip status: the clip goes active then done, or the speaker reports it could not play it. |
+| `state` | Every other player | The player enters a playing state, switches to different media, or (if it was already playing) picks up a new media duration. |
+
+Sonos needs its own check because HA plays announcements on Sonos as audio
+clips, and the media player entity does not change state while a clip plays.
+The Sonos check connects to the speaker's local API (the same one HA's Sonos
+integration uses). If it cannot, it quietly falls back to the `state` check.
+
+Checks for other kinds of player can be added by subclassing
+`StateVerifier` in `custom_components/intercom/verifiers/`; see the docstring
+in `verifiers/base.py`.
+
+If a broadcast is reported as failed but you heard it, or it is reported as
+played on a speaker that stayed silent, see
+[the troubleshooting guide](docs/troubleshooting.md).
 
 ### Sending something that has to get through
 
@@ -323,8 +342,9 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 
 ## Limitations
 
-- **Confirmation is state-based, not acoustic.** `played` means the player
-  reported that it started playing the clip, and that it was neither muted nor
+- **Confirmation is reported, not acoustic.** `played` means the player (or,
+  for Sonos, the speaker itself) reported that it started playing the clip, and
+  that it was neither muted nor
   at zero volume. It cannot catch a speaker whose amplifier is off, whose output
   is routed elsewhere, or that is physically unplugged mid-sentence. It does
   catch the common cases: rejected commands, muted or silenced speakers, and

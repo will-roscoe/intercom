@@ -19,7 +19,9 @@ failure modes that prompted this code:
 
 | File | Guards |
 | --- | --- |
-| `test_broadcast.py` | A player is reported `played` only with evidence of audio. Silent, muted, zero-volume, offline, unsupported, failing and hanging players each get their own honest status. |
+| `test_broadcast.py` | A player is reported `played` only with evidence of audio. Silent, muted, zero-volume, offline, unsupported, failing and hanging players each get their own honest status, including Sonos announcements that never change entity state. |
+| `test_verifiers.py` | The verifier API: subclasses must define `name` and `matches`, the highest-priority match is chosen, a broken matcher is skipped, and every player falls back to a check. |
+| `test_sonos_verifier.py` | Finding the Sonos speaker behind native and Music Assistant entities, and reading its clip status: played, refused, stale or foreign clips ignored, and falling back to state when the speaker cannot be followed. The fake speaker replays the handshake a real Sonos Roam sends. |
 | `test_service.py` | The service response, the fired event, the persistent notification, and `critical` escalation. |
 | `test_websocket.py` | The non-admin subscription: not admin-gated, replays the last broadcast, torn down by core's generic unsubscribe. |
 | `test_packaging.py` | The files hassfest and HACS parse — service schema, manifest, translations, declared dependencies. |
