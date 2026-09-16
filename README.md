@@ -356,6 +356,15 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 - **Notify delivery isn't confirmed.** A failed notify *service call* is reported
   and retried, but Home Assistant cannot confirm a push actually reached a phone.
   Treat `sent` as "handed to the notification platform".
+- **One Sonos speaker, one entity per broadcast.** Sonos confirmation follows
+  the first new clip on the speaker. If a broadcast targets the same physical
+  speaker through two entities (e.g. the native Sonos entity *and* its Music
+  Assistant player), both results follow the same clip, and the message is
+  spoken twice anyway. Pick one entity per speaker.
+- **Audio that bypasses Sonos clips takes the full start timeout to confirm.**
+  If a Sonos is fed some other way (e.g. Music Assistant streaming over
+  AirPlay), the speaker reports no clip. The check then waits out the start
+  timeout before judging by entity state instead.
 - **A speaker in a group may play on its coordinator.** Multi-room groups are
   reported per entity; the audio may come out of the group instead.
 

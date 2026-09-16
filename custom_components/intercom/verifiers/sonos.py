@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 
+from .base import Verdict
 from .state import StateVerifier
 
 _LOGGER = logging.getLogger(__package__)
@@ -273,8 +274,9 @@ class SonosClipVerifier(StateVerifier):
         super().__init__(hass, entity_id)
         self._channel: SonosClipChannel | None = None
         self._reader: asyncio.Task[None] | None = None
-        # State evidence seen while the clip channel was deciding.
+        # State evidence held back while the clip channel was deciding.
         self._state_evidence: list[Callable[[], None]] = []
+        self._trust_state = False
 
     @classmethod
     def matches(cls, hass: HomeAssistant, entity_id: str) -> bool:
@@ -283,6 +285,21 @@ class SonosClipVerifier(StateVerifier):
     @property
     def channel_live(self) -> bool:
         return self._reader is not None and not self._reader.done()
+
+    async def async_wait_started(self, timeout: float) -> Verdict:
+        verdict = await self._async_wait_evidence(timeout)
+        if (
+            verdict is Verdict.TIMEOUT
+            and self._channel is not None
+            and self._channel.clip_id is None
+        ):
+            # The speaker never saw a clip at all, so the audio took another
+            # route (e.g. Music Assistant streaming over AirPlay). Only the
+            # entity state can tell us anything now.
+            self._use_state_evidence()
+            if self.started.is_set():
+                return Verdict.STARTED
+        return verdict
 
     async def async_arm(self) -> None:
         await super().async_arm()
@@ -335,9 +352,13 @@ class SonosClipVerifier(StateVerifier):
                 "intercom: lost the Sonos clip channel for %s; using state checks",
                 self.entity_id,
             )
-            evidence, self._state_evidence = self._state_evidence, []
-            for apply in evidence:
-                apply()
+            self._use_state_evidence()
+
+    def _use_state_evidence(self) -> None:
+        self._trust_state = True
+        evidence, self._state_evidence = self._state_evidence, []
+        for apply in evidence:
+            apply()
 
     def _on_clip_status(self, status: str) -> None:
         if status == "ACTIVE":
@@ -359,13 +380,13 @@ class SonosClipVerifier(StateVerifier):
     # claim to be playing while the speaker is refusing the clip.
 
     def _on_state_started(self) -> None:
-        if self.channel_live:
+        if self.channel_live and not self._trust_state:
             self._state_evidence.append(self._mark_started)
         else:
             super()._on_state_started()
 
     def _on_state_finished(self) -> None:
-        if self.channel_live:
+        if self.channel_live and not self._trust_state:
             self._state_evidence.append(self._mark_finished)
         else:
             super()._on_state_finished()

@@ -216,13 +216,15 @@ def test_state_alone_is_not_trusted_while_the_speaker_is_talking(monkeypatch):
         socket = FakeClipSocket()
         hass, verifier = await armed(monkeypatch, socket)
         hass.states.set(SONOS, "playing", {"media_content_id": "clip"})
-        before = await verifier.async_wait_started(0.2)
-        socket.push_status(("ours", "ERROR"))
-        after = await verifier.async_wait_started(1)
+        # Live, an unreachable clip is reported ~3s in, well inside the timeout.
+        asyncio.get_running_loop().call_later(
+            0.2, socket.push_status, ("ours", "ERROR")
+        )
+        verdict = await verifier.async_wait_started(1)
         await verifier.async_disarm()
-        return before, after
+        return verdict, verifier.started.is_set()
 
-    assert run(scenario()) == (Verdict.TIMEOUT, Verdict.FAILED)
+    assert run(scenario()) == (Verdict.FAILED, False)
 
 
 def test_state_evidence_counts_once_the_speaker_hangs_up(monkeypatch):
@@ -236,3 +238,33 @@ def test_state_evidence_counts_once_the_speaker_hangs_up(monkeypatch):
         return verdict
 
     assert run(scenario()) is Verdict.STARTED
+
+
+def test_audio_that_bypasses_clips_is_judged_by_state(monkeypatch):
+    """E.g. Music Assistant streaming to the Sonos over AirPlay: no clip at all."""
+
+    async def scenario():
+        socket = FakeClipSocket()
+        hass, verifier = await armed(monkeypatch, socket)
+        hass.states.set(SONOS, "playing", {"media_content_id": "stream"})
+        started = await verifier.async_wait_started(0.3)
+        hass.states.set(SONOS, "idle", {})
+        finished = await verifier.async_wait_finished(1)
+        await verifier.async_disarm()
+        return started, finished
+
+    assert run(scenario()) == (Verdict.STARTED, True)
+
+
+def test_state_is_not_used_once_the_speaker_has_seen_our_clip(monkeypatch):
+    async def scenario():
+        socket = FakeClipSocket()
+        hass, verifier = await armed(monkeypatch, socket)
+        socket.push_status(("ours", "INACTIVE"))
+        await asyncio.sleep(0.05)
+        hass.states.set(SONOS, "playing", {"media_content_id": "clip"})
+        verdict = await verifier.async_wait_started(0.3)
+        await verifier.async_disarm()
+        return verdict
+
+    assert run(scenario()) is Verdict.TIMEOUT
