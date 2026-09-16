@@ -12,12 +12,16 @@ from helpers import (
     ENGINE,
     SONOS,
     STUDY,
+    FakeClipSocket,
     always_fails,
     by_entity,
     make_request,
     new_hass,
+    register_sonos,
     register_speak,
     speaks_on,
+    speaks_on_sonos,
+    use_fake_speaker,
 )
 from intercom.broadcast import async_run_notify, async_run_players
 
@@ -312,3 +316,91 @@ def test_an_unexpected_crash_becomes_an_outcome():
     outcome = run(scenario())[0]
     assert outcome["status"] == "failed"
     assert outcome["error"] == "kaboom"
+
+
+# --- Sonos announcements (no state change while a clip plays) -------------------
+
+
+def test_sonos_announcement_heard_is_played_not_unverified(monkeypatch):
+    """Regression: a native Sonos announcement was reported FAILED when heard."""
+
+    async def scenario():
+        hass = new_hass()
+        register_sonos(hass)
+        socket = FakeClipSocket()
+        use_fake_speaker(monkeypatch, socket)
+        register_speak(hass, speaks_on_sonos(socket, "ACTIVE", "DONE"))
+        outcomes = await async_run_players(hass, make_request(), True)
+        return outcomes[0], socket.closed
+
+    outcome, closed = run(scenario())
+    assert outcome["status"] == "played"
+    assert outcome["verified"] is True
+    assert outcome["verified_by"] == "sonos_clip"
+    assert outcome["detail"] is None
+    assert closed
+
+
+def test_sonos_clip_the_speaker_cannot_fetch_is_failed_and_retried(monkeypatch):
+    async def scenario():
+        hass = new_hass()
+        register_sonos(hass)
+        sockets: list[FakeClipSocket] = []
+
+        from intercom.verifiers import sonos
+
+        async def open_socket(hass_, host):
+            sockets.append(FakeClipSocket())
+            return sockets[-1]
+
+        async def speak(hass_, data):
+            socket = sockets[-1]
+            asyncio.get_running_loop().call_later(
+                0.02, socket.push_status, ("clip", "ERROR")
+            )
+
+        monkeypatch.setattr(sonos, "open_clip_socket", open_socket)
+        register_speak(hass, speak)
+        return await async_run_players(hass, make_request(), True)
+
+    outcome = run(scenario())[0]
+    assert outcome["status"] == "failed"
+    assert outcome["attempts"] == 2
+    assert outcome["verified_by"] == "sonos_clip"
+    assert "could not play the clip" in outcome["error"]
+
+
+def test_sonos_without_a_reachable_speaker_uses_the_state_check(monkeypatch):
+    async def scenario():
+        hass = new_hass()
+        register_sonos(hass)
+        use_fake_speaker(monkeypatch, OSError("no route to host"))
+        register_speak(hass, speaks_on(SONOS))
+        return await async_run_players(hass, make_request(), True)
+
+    outcome = run(scenario())[0]
+    assert outcome["status"] == "played"
+    assert outcome["verified_by"] == "sonos_clip"
+
+
+def test_non_sonos_player_is_judged_by_state():
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, speaks_on(SONOS))
+        return await async_run_players(hass, make_request(), True)
+
+    assert run(scenario())[0]["verified_by"] == "state"
+
+
+def test_verify_off_never_contacts_the_speaker(monkeypatch):
+    async def scenario():
+        hass = new_hass()
+        register_sonos(hass)
+        use_fake_speaker(monkeypatch, AssertionError("must not connect"))
+        register_speak(hass, speaks_on())
+        return await async_run_players(hass, make_request(verify=False), True)
+
+    outcome = run(scenario())[0]
+    assert outcome["status"] == "sent"
+    assert outcome["verified_by"] is None
+    assert "verification disabled" in outcome["detail"]
