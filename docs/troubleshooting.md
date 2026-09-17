@@ -132,11 +132,9 @@ Every broadcast is logged under `custom_components.intercom` with a short id,
 e.g. `intercom[d92473b7]: FAILED — played on 0/1 speakers (…)`. The same id is
 in the result as `id`.
 
-To follow the speaker side, look at **every** add-on involved, not just Home
-Assistant's own log. The Sonos errors above only appear in Music Assistant's.
-On Home Assistant OS, `journalctl` on the host (SSH on port 22222) has the
-complete log of every add-on. The per-add-on log view in the UI may be
-truncated.
+Note that a speaker's own errors, such as the Sonos playback error above, are
+reported to whatever asked it to play. They appear in that component's log
+rather than in this integration's.
 
 For more detail from this integration:
 
