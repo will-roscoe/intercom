@@ -23,8 +23,7 @@ import logging
 from typing import Any
 from uuid import uuid4
 
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, State, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.core import HomeAssistant, State
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -33,7 +32,6 @@ from .const import (
     FEATURE_PLAY_MEDIA,
     FEATURE_VOLUME_MUTE,
     FEATURE_VOLUME_SET,
-    PLAYING_STATES,
     STATUS_FAILED,
     STATUS_OFFLINE,
     STATUS_PLAYED,
@@ -44,6 +42,7 @@ from .const import (
     UNAVAILABLE_STATES,
     VOLUME_SETTLE_SECONDS,
 )
+from .verifiers import PlaybackVerifier, Verdict, select_verifier
 
 _LOGGER = logging.getLogger(__package__)
 
@@ -79,121 +78,6 @@ class _Preparation:
     silent_reason: str | None = None
 
 
-# --- playback verification ----------------------------------------------------
-
-
-def _looks_like_playback_start(
-    old: State | None,
-    new: State,
-    baseline_content: str | None,
-    was_playing: bool,
-) -> bool:
-    """Decide whether a state change is our announcement starting.
-
-    Players differ wildly in what they report, so we accept any of three signals:
-    a transition into a playing state, a switch to different media, or (for a
-    player that was already playing music) a new media duration.
-    """
-    if new.state in PLAYING_STATES and (old is None or old.state not in PLAYING_STATES):
-        return True
-
-    if new.state in UNAVAILABLE_STATES:
-        return False
-
-    content = new.attributes.get("media_content_id")
-    if content and content != baseline_content:
-        return True
-
-    if was_playing and new.state in PLAYING_STATES:
-        duration = new.attributes.get("media_duration")
-        previous = old.attributes.get("media_duration") if old else None
-        if duration is not None and duration != previous:
-            return True
-
-    return False
-
-
-class _PlaybackWatch:
-    """Watch one media player for evidence that our announcement played.
-
-    Armed *before* ``tts.speak`` is called so nothing is missed, including clips
-    short enough to begin and end while the service call is still returning.
-    """
-
-    def __init__(self, hass: HomeAssistant, entity_id: str) -> None:
-        self._hass = hass
-        self._entity_id = entity_id
-        self._unsub: CALLBACK_TYPE | None = None
-        self._baseline_content: str | None = None
-        self._was_playing = False
-        self._playing_content: str | None = None
-        self.started = asyncio.Event()
-        self.finished = asyncio.Event()
-
-    def arm(self) -> None:
-        """Start listening. Call this before asking the player to speak."""
-        state = self._hass.states.get(self._entity_id)
-        if state is not None:
-            self._baseline_content = state.attributes.get("media_content_id")
-            self._was_playing = state.state in PLAYING_STATES
-        self._unsub = async_track_state_change_event(
-            self._hass, [self._entity_id], self._handle
-        )
-
-    def disarm(self) -> None:
-        """Stop listening."""
-        if self._unsub is not None:
-            self._unsub()
-            self._unsub = None
-
-    @callback
-    def _handle(self, event: Event) -> None:
-        new: State | None = event.data.get("new_state")
-        if new is None:
-            return
-
-        if not self.started.is_set():
-            if _looks_like_playback_start(
-                event.data.get("old_state"),
-                new,
-                self._baseline_content,
-                self._was_playing,
-            ):
-                self._playing_content = new.attributes.get("media_content_id")
-                self.started.set()
-            return
-
-        # Finished = no longer playing, or moved on to different media (a player
-        # that resumes the music it interrupted never leaves the playing state).
-        if new.state not in PLAYING_STATES:
-            self.finished.set()
-            return
-        content = new.attributes.get("media_content_id")
-        if self._playing_content is not None and content not in (
-            None,
-            self._playing_content,
-        ):
-            self.finished.set()
-
-    async def wait_started(self, timeout: float) -> bool:
-        """Return True once playback evidence is seen, False on timeout."""
-        return await _wait_event(self.started, timeout)
-
-    async def wait_finished(self, timeout: float) -> bool:
-        """Return True once playback has ended, False on timeout."""
-        return await _wait_event(self.finished, timeout)
-
-
-async def _wait_event(event: asyncio.Event, timeout: float) -> bool:
-    """Wait for an asyncio event, returning False instead of raising on timeout."""
-    try:
-        async with asyncio.timeout(timeout):
-            await event.wait()
-    except TimeoutError:
-        return False
-    return True
-
-
 # --- speaking -----------------------------------------------------------------
 
 
@@ -217,6 +101,8 @@ def _new_player_outcome(hass: HomeAssistant, entity_id: str) -> dict[str, Any]:
         "name": _friendly_name(hass, entity_id),
         "status": STATUS_OFFLINE,
         "verified": False,
+        # Which check judged playback (see verifiers/); None if never checked.
+        "verified_by": None,
         "attempts": 0,
         "error": None,
         "detail": None,
@@ -378,9 +264,14 @@ async def _async_speak_on_player(
         prep = await _async_prepare_player(
             hass, request, entity_id, state, features, outcome
         )
-        watch = _PlaybackWatch(hass, entity_id)
-        watch.arm()
+        verifier = (
+            select_verifier(hass, entity_id)
+            if request.verify
+            else PlaybackVerifier(hass, entity_id)
+        )
         try:
+            # Armed before speaking so even the shortest clip is observed.
+            await verifier.async_arm()
             try:
                 async with asyncio.timeout(request.wait_timeout):
                     await hass.services.async_call(
@@ -407,10 +298,10 @@ async def _async_speak_on_player(
                 outcome["status"] = STATUS_FAILED
                 outcome["error"] = _error_text(err)
             else:
-                await _async_confirm_playback(request, watch, outcome)
+                await _async_confirm_playback(request, verifier, outcome)
                 _apply_silence(prep, outcome)
         finally:
-            watch.disarm()
+            await verifier.async_disarm()
             await _async_restore_player(hass, entity_id, prep.restore, outcome)
 
         if outcome["status"] in DELIVERED_STATUSES:
@@ -438,15 +329,31 @@ def _apply_silence(prep: _Preparation, outcome: dict[str, Any]) -> None:
 
 
 async def _async_confirm_playback(
-    request: BroadcastRequest, watch: _PlaybackWatch, outcome: dict[str, Any]
+    request: BroadcastRequest,
+    verifier: PlaybackVerifier,
+    outcome: dict[str, Any],
 ) -> None:
     """Turn "the service call returned" into an honest playback status."""
-    if not request.verify:
+    verdict = await verifier.async_wait_started(request.start_timeout)
+    outcome["verified_by"] = verifier.name
+
+    if verdict is Verdict.ASSUMED:
         outcome["status"] = STATUS_SENT
-        outcome["detail"] = "verification disabled; playback not confirmed"
+        outcome["verified_by"] = None
+        outcome["detail"] = (
+            "verification disabled; playback not confirmed"
+            if not request.verify
+            else "no playback check is available for this player; "
+            "playback not confirmed"
+        )
         return
 
-    if not await watch.wait_started(request.start_timeout):
+    if verdict is Verdict.FAILED:
+        outcome["status"] = STATUS_FAILED
+        outcome["error"] = verifier.failure or "the player could not play the clip"
+        return
+
+    if verdict is Verdict.TIMEOUT:
         outcome["status"] = STATUS_UNVERIFIED
         outcome["error"] = (
             f"the player accepted the command but no playback was detected "
@@ -457,7 +364,7 @@ async def _async_confirm_playback(
     outcome["status"] = STATUS_PLAYED
     outcome["verified"] = True
     outcome["error"] = None
-    if not await watch.wait_finished(request.wait_timeout):
+    if not await verifier.async_wait_finished(request.wait_timeout):
         outcome["detail"] = "still playing when the wait timed out"
 
 
