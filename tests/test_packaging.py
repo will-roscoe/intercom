@@ -109,3 +109,14 @@ def test_card_is_served_and_registered_under_the_same_name():
     constants = (COMPONENT / "const.py").read_text()
     filename = re.search(r'CARD_FILENAME: Final = "([^"]+)"', constants).group(1)
     assert (COMPONENT / "www" / filename).is_file()
+
+
+def test_card_version_matches_the_manifest():
+    """The card logs its own version; a stale one misreports what is running."""
+    constants = (COMPONENT / "const.py").read_text()
+    filename = re.search(r'CARD_FILENAME: Final = "([^"]+)"', constants).group(1)
+    card = (COMPONENT / "www" / filename).read_text()
+    card_version = re.search(r'const VERSION = "([^"]+)"', card).group(1)
+    assert (
+        card_version == json.loads((COMPONENT / "manifest.json").read_text())["version"]
+    )

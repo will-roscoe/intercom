@@ -104,11 +104,17 @@ notify:
 | `default_volume` | `40` | Initial slider value (0–100). |
 | `show_volume` | `true` | Hide the slider with `false`. |
 | `volume_step` | `5` | Slider step. |
-| `critical` | `false` | Send every broadcast from this card as critical. |
+| `show_critical` | `false` | Show a **Critical** toggle beside the Broadcast button. |
+| `critical` | `false` | With `show_critical`, where that toggle starts. Without it, every broadcast from this card is critical. |
 
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
 broadcast. After each broadcast the card lists every target and what happened to
 it, and offers a one-tap **Retry** for any speaker that did not produce sound.
+
+The message box has a **✕** to clear it, and clears itself once a broadcast this
+card sent comes back complete — every speaker played and every notify target
+sent. Anything less leaves the text so you can retry or edit it. Broadcasts sent
+from elsewhere never clear it.
 Broadcasts sent from elsewhere — another household member's phone, an automation
 — show up too, and the last one is replayed when the card loads.
 
@@ -287,6 +293,9 @@ played on a speaker that stayed silent, see
 [the troubleshooting guide](docs/troubleshooting.md).
 
 ### Sending something that has to get through
+
+On the card, set `show_critical: true` to arm this per message with the
+**Critical** toggle beside the Broadcast button. From an automation or script:
 
 ```yaml
 action: intercom.broadcast

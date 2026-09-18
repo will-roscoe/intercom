@@ -4,6 +4,9 @@
 type: custom:intercom-card
 title: Intercom
 default_volume: 40
+# Offer a Critical toggle next to the Broadcast button. Armed, the broadcast
+# retries harder, raises silent speakers and reports loudly if it fails.
+show_critical: true
 players:
   - entity: media_player.sonos_living_room
     name: Living Room

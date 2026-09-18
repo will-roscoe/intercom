@@ -18,7 +18,10 @@
  *   title: Intercom            # optional card header
  *   default_volume: 40         # optional, 0-100; set `show_volume: false` to hide slider
  *   show_volume: true          # optional
- *   critical: false            # optional; retry harder and fail loudly
+ *   show_critical: false       # optional; show a Critical toggle by the button
+ *   critical: false            # optional; retry harder and fail loudly. With
+ *                              # show_critical it is where the toggle starts,
+ *                              # otherwise it applies to every broadcast
  *   players:                   # optional; auto-discovers media_player.* if omitted
  *     - entity: media_player.sonosroam
  *       name: Sonos Roam
@@ -27,7 +30,7 @@
  *       name: My Phone
  */
 
-const VERSION = "0.2.0";
+const VERSION = "0.4.0";
 
 // Per-target statuses returned by intercom.broadcast.
 const OK_STATUSES = new Set(["played", "sent"]);
@@ -50,6 +53,7 @@ class IntercomCard extends HTMLElement {
     this._selectedPlayers = new Set();
     this._selectedNotify = new Set();
     this._volume = 40;
+    this._critical = false;
     this._built = false;
     this._unsub = null;
     this._subscribed = false;
@@ -63,6 +67,7 @@ class IntercomCard extends HTMLElement {
     return {
       title: "Intercom",
       default_volume: 40,
+      show_critical: false,
       players: [],
       notify: [],
     };
@@ -70,6 +75,9 @@ class IntercomCard extends HTMLElement {
 
   setConfig(config) {
     this._config = config || {};
+    // With show_critical, `critical` is where the toggle starts; without it,
+    // it is fixed for every broadcast, as it always was.
+    this._critical = !!this._config.critical;
     this._volume =
       typeof this._config.default_volume === "number"
         ? this._config.default_volume
@@ -171,9 +179,23 @@ class IntercomCard extends HTMLElement {
     msg.placeholder = "Type a message to broadcast…";
     msg.rows = 2;
     msg.value = this._message || "";
-    msg.addEventListener("input", (e) => (this._message = e.target.value));
+    msg.addEventListener("input", (e) => {
+      this._message = e.target.value;
+      this._updateClearButton();
+    });
     this._msgEl = msg;
-    content.appendChild(this._field("Message", msg));
+
+    const clear = document.createElement("button");
+    clear.className = "clear";
+    clear.type = "button";
+    clear.title = "Clear the message";
+    clear.setAttribute("aria-label", "Clear the message");
+    clear.textContent = "✕";
+    clear.addEventListener("click", () => this._clearMessage());
+    this._clearEl = clear;
+
+    content.appendChild(this._field("Message", msg, clear));
+    this._updateClearButton();
 
     // volume
     if (this._config.show_volume !== false) {
@@ -220,13 +242,37 @@ class IntercomCard extends HTMLElement {
       content.appendChild(this._section("Notify", this._notifyChips));
     }
 
-    // broadcast button
+    // broadcast button, with the critical toggle beside it when enabled
     const btn = document.createElement("button");
     btn.className = "broadcast";
     btn.innerHTML = `<span class="mdi">📣</span> Broadcast`;
     btn.addEventListener("click", () => this._broadcast());
     this._btn = btn;
-    content.appendChild(btn);
+
+    if (this._config.show_critical) {
+      const row = document.createElement("div");
+      row.className = "send-row";
+      row.appendChild(btn);
+
+      const toggle = document.createElement("button");
+      toggle.className = "critical";
+      toggle.type = "button";
+      toggle.innerHTML = `<span class="mdi">⚠</span> Critical`;
+      toggle.title =
+        "Retry harder, raise silent speakers, and fail loudly if the " +
+        "message does not get through";
+      toggle.addEventListener("click", () => {
+        this._critical = !this._critical;
+        this._updateCriticalButton();
+      });
+      this._criticalEl = toggle;
+      row.appendChild(toggle);
+      this._updateCriticalButton();
+      content.appendChild(row);
+    } else {
+      this._criticalEl = null;
+      content.appendChild(btn);
+    }
 
     // status
     this._statusEl = document.createElement("div");
@@ -242,12 +288,21 @@ class IntercomCard extends HTMLElement {
     else if (this._statusText) this._setStatus(this._statusText);
   }
 
-  _field(label, el) {
+  _field(label, el, action) {
     const row = document.createElement("div");
     row.className = "field";
     const lbl = document.createElement("label");
     lbl.textContent = label;
-    row.appendChild(lbl);
+    if (action) {
+      // Keep the action on the label's own line so it never covers the input.
+      const head = document.createElement("div");
+      head.className = "field-head";
+      head.appendChild(lbl);
+      head.appendChild(action);
+      row.appendChild(head);
+    } else {
+      row.appendChild(lbl);
+    }
     row.appendChild(el);
     return row;
   }
@@ -317,7 +372,7 @@ class IntercomCard extends HTMLElement {
     if (notifyTargets.length) data.notify = notifyTargets;
     if (this._config.show_volume !== false && players.length)
       data.volume = this._volume;
-    if (this._config.critical) data.critical = true;
+    if (this._critical) data.critical = true;
 
     this._busy(true);
     this._pending = true;
@@ -357,6 +412,25 @@ class IntercomCard extends HTMLElement {
 
   _busy(on) {
     if (this._btn) this._btn.disabled = !!on;
+  }
+
+  _clearMessage(focus = true) {
+    this._message = "";
+    if (this._msgEl) {
+      this._msgEl.value = "";
+      if (focus) this._msgEl.focus();
+    }
+    this._updateClearButton();
+  }
+
+  _updateClearButton() {
+    if (this._clearEl) this._clearEl.hidden = !(this._message || "").length;
+  }
+
+  _updateCriticalButton() {
+    if (!this._criticalEl) return;
+    this._criticalEl.classList.toggle("armed", !!this._critical);
+    this._criticalEl.setAttribute("aria-pressed", this._critical ? "true" : "false");
   }
 
   _subscribe() {
@@ -456,10 +530,7 @@ class IntercomCard extends HTMLElement {
 
     // Broadcasts fired elsewhere (automations) also land here for admins;
     // only clear the box for a message this card actually sent.
-    if (own && complete && this._msgEl) {
-      this._message = "";
-      this._msgEl.value = "";
-    }
+    if (own && complete) this._clearMessage(false);
   }
 
   _row(label, status, detail, ok) {
@@ -511,6 +582,31 @@ const STYLES = `
     border: 1px solid var(--divider-color); border-radius: 10px; padding: 10px 12px;
   }
   textarea.message:focus { outline: none; border-color: var(--primary-color); }
+  .field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  button.clear {
+    border: none; background: none; cursor: pointer; font: inherit;
+    line-height: 1; padding: 2px 6px; border-radius: 8px;
+    color: var(--secondary-text-color);
+  }
+  button.clear:hover { color: var(--primary-text-color); background: var(--secondary-background-color); }
+  button.clear[hidden] { display: none; }
+  .send-row { display: flex; align-items: stretch; gap: 8px; margin-top: 4px; }
+  .send-row button.broadcast { flex: 1; margin-top: 0; }
+  button.critical {
+    flex: none; padding: 0 16px; border-radius: 12px; cursor: pointer;
+    font: inherit; font-weight: 700; white-space: nowrap;
+    color: var(--secondary-text-color);
+    background: var(--secondary-background-color);
+    border: 2px solid var(--divider-color);
+    transition: border-color 120ms, background 120ms, color 120ms;
+  }
+  button.critical:hover { border-color: var(--warning-color, #ff9800); }
+  button.critical.armed {
+    color: var(--warning-color, #ff9800);
+    border-color: var(--warning-color, #ff9800);
+    background: color-mix(in srgb, var(--warning-color, #ff9800) 16%, var(--card-background-color));
+  }
+  button.critical .mdi { margin-right: 6px; }
   .volume { display: flex; align-items: center; gap: 12px; }
   .volume input[type="range"] { flex: 1; accent-color: var(--primary-color); }
   .volume-value {
