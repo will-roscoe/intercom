@@ -29,3 +29,5 @@ Thumbs.db
 
 # Local planning / design docs (kept off the public repo)
 .claude/
+CLAUDE.md
+.remember/
