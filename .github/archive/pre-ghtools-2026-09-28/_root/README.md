@@ -1,7 +1,7 @@
 # Intercom
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Validate](https://github.com/will-roscoe/intercom/actions/workflows/ghtools.yml/badge.svg)](https://github.com/will-roscoe/intercom/actions/workflows/ghtools.yml)
+[![Validate](https://github.com/will-roscoe/intercom/actions/workflows/validate.yaml/badge.svg)](https://github.com/will-roscoe/intercom/actions/workflows/validate.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Home Assistant integration that turns any set of speakers and phones into an
