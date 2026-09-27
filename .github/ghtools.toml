@@ -1,0 +1,22 @@
+# ghtools settings: https://github.com/will-roscoe/.ghtools#configuration
+
+branch = "main"                              # the remote's default branch
+profile = "hacs"                             # custom_components/*/manifest.json + hacs.json
+
+[version]
+source = "manifest"                          # custom_components/intercom/manifest.json (HACS integration)
+bump = "write"                               # ghtools computes the version from commits and writes it
+manifest = "custom_components/intercom/manifest.json" # HACS manifest
+
+[release]
+publish = ["github-zip"]                     # zip step in release workflow
+zip = "custom_components/intercom"           # zip step in release workflow
+changelog = ""                               # no CHANGELOG.md
+
+[ci]
+python = ["3.13"]                            # python-version in workflows
+install = "ruff pytest pyyaml voluptuous"    # pip install in test workflow
+gates = ["ruff", "ruff-format"]              # tool configuration and existing workflows
+
+[status]
+enabled = true                               # ghtools publishes the status card to its own branch
