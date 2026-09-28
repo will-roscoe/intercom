@@ -20,3 +20,8 @@ gates = ["ruff", "ruff-format"]              # tool configuration and existing w
 
 [status]
 enabled = true                               # ghtools publishes the status card to its own branch
+logo = ".github/logo.svg"                      # the card shows the project logo
+
+[[readme.block]]
+name = "status"
+kind = "status"                              # the status card under the title
