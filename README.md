@@ -1,7 +1,12 @@
 # Intercom
 
+<!-- ghtools:sync status START — generated from the status branch, do not edit here -->
+
+<img src="https://github.com/will-roscoe/intercom/raw/ghtools-status/status.svg" alt="will-roscoe/intercom status" width="900">
+
+<!-- ghtools:sync status END -->
+
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![Validate](https://github.com/will-roscoe/intercom/actions/workflows/ghtools.yml/badge.svg)](https://github.com/will-roscoe/intercom/actions/workflows/ghtools.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A Home Assistant integration that turns any set of speakers and phones into an
