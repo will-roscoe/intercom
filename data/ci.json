@@ -1,0 +1,36 @@
+{
+  "builds": {
+    "Linux": {
+      "x86_64": "passing"
+    }
+  },
+  "coverage": null,
+  "docstrings": null,
+  "lint": {
+    "gates": [
+      "ruff",
+      "ruff-format"
+    ],
+    "status": "passing"
+  },
+  "python": [
+    {
+      "status": "passing",
+      "version": "3.13"
+    }
+  ],
+  "run": {
+    "commit": "bbcc0f36612a06e7f1300a08cc3410c605313dfe",
+    "id": "36421925130",
+    "url": "https://github.com/will-roscoe/intercom/actions/runs/36421925130"
+  },
+  "source": "ci",
+  "tests": {
+    "duration_s": 14.06,
+    "failed": 0,
+    "passed": 80,
+    "skipped": 0,
+    "total": 80
+  },
+  "updated": "2026-09-28T12:28:56Z"
+}

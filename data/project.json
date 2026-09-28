@@ -1,0 +1,14 @@
+{
+  "description": "Broadcast TTS announcements over your Home Assistant media players and notify your devices \u2014 one service and one Lovelace card.",
+  "links": {
+    "docs": "",
+    "pypi": "",
+    "repo": ""
+  },
+  "name": "intercom",
+  "open_issues": 1,
+  "released": "2026-09-18",
+  "source": "project",
+  "updated": "2026-09-27T23:46:07Z",
+  "version": "0.4.0"
+}
