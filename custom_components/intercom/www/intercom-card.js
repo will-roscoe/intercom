@@ -30,7 +30,11 @@
  *       name: My Phone
  */
 
-const VERSION = "0.4.0";
+// The integration serves this file as `intercom-card.js?v=<manifest version>`
+// (frontend.py), so the version is read from that URL rather than kept here as
+// a second copy that releases would leave behind.
+const VERSION =
+  new URL(import.meta.url).searchParams.get("v") || "unknown";
 
 // Per-target statuses returned by intercom.broadcast.
 const OK_STATUSES = new Set(["played", "sent"]);
