@@ -645,6 +645,7 @@ def build_result(
     offline = by_status.get(STATUS_OFFLINE, [])
     unsupported = by_status.get(STATUS_UNSUPPORTED, [])
     silent = by_status.get(STATUS_SILENT, [])
+    rerouted = by_status.get(STATUS_REROUTED, [])
 
     notified = [o["target"] for o in notify_outcomes if o["status"] == STATUS_SENT]
     notify_failed = [o["target"] for o in notify_outcomes if o["status"] != STATUS_SENT]
@@ -690,6 +691,8 @@ def build_result(
         "offline": offline,
         "unsupported": unsupported,
         "silent": silent,
+        # Requested speakers an alternate delivered for (see "rerouted_to").
+        "rerouted": rerouted,
         "notified": notified,
         "notify_failed": notify_failed,
         "errors": errors,
@@ -706,12 +709,26 @@ def _summarise(
     notify_outcomes: list[dict[str, Any]],
     errors: list[str],
 ) -> str:
-    """One sentence describing the broadcast, suitable for a card or a log."""
-    good = sum(1 for o in player_outcomes if o["status"] in DELIVERED_STATUSES)
+    """One sentence describing the broadcast, suitable for a card or a log.
+
+    Speakers are counted as requested: a rerouted speaker counts as played and
+    is named with its alternate, e.g. ``played on 1/1 speakers (Sonos via
+    Study)``; an alternate's own row is not counted again.
+    """
+    names = {o["entity_id"]: o["name"] for o in player_outcomes}
+    requested = [o for o in player_outcomes if o["alternate_for"] is None]
+    good = sum(1 for o in requested if o["status"] in DELIVERED_STATUSES)
     sent = sum(1 for o in notify_outcomes if o["status"] == STATUS_SENT)
     parts: list[str] = []
-    if player_outcomes:
-        parts.append(f"played on {good}/{len(player_outcomes)} speakers")
+    if requested:
+        via = ", ".join(
+            f"{o['name']} via {names.get(o['rerouted_to'], o['rerouted_to'])}"
+            for o in requested
+            if o["status"] == STATUS_REROUTED
+        )
+        parts.append(
+            f"played on {good}/{len(requested)} speakers" + (f" ({via})" if via else "")
+        )
     if notify_outcomes:
         parts.append(f"notified {sent}/{len(notify_outcomes)} targets")
     head = ", ".join(parts) or "nothing to do"

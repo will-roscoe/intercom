@@ -217,9 +217,18 @@ event) that says what happened to each target individually:
 | `offline` | The entity is missing or `unavailable`; nothing was attempted. |
 | `unsupported` | The entity exists but cannot play media at all. |
 | `sent` | Only with `verify: false` — dispatched, delivery not confirmed. |
+| `rerouted` | The speaker was `offline` or `unsupported`, and one of its [`alternates`](#the-service) delivered the message instead. `rerouted_to` names which; `detail` lists every alternate tried. |
 
 `delivered` is true when at least one target definitely got the message.
-`complete` is true only when *every* requested target did.
+`complete` is true only when *every* requested target did; a `rerouted` speaker
+counts, and the summary names it, e.g. `played on 1/1 speakers (Kitchen via Lounge)`.
+
+An alternate that was not itself requested gets its own entry in `players`, with
+`alternate_for` naming the speaker it stood in for, and appears in the flat
+lists (`played`, `failed`, ...) under its own entity id. `rerouted` lists the
+requested speakers an alternate covered. Alternates skipped because they were
+offline get no entry; they are named in the speaker's `detail`, or in its
+`error` when no alternate could play.
 
 ### Non-admin users
 
