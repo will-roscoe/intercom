@@ -67,6 +67,9 @@ class BroadcastRequest:
     max_attempts: int
     wait_timeout: float
     start_timeout: float
+    # Requested player -> the players to try instead, in order, when it is
+    # offline or cannot play media. Never contains the player itself.
+    alternates: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass

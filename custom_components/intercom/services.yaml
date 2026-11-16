@@ -100,3 +100,12 @@ broadcast:
           max: 5
           step: 1
           mode: box
+    alternates:
+      name: Alternates
+      description: >-
+        Per speaker, the speakers to play on instead, in order, when it is
+        offline or cannot play media. Each key must be one of the players.
+      required: false
+      example: '{"media_player.kitchen": ["media_player.lounge"]}'
+      selector:
+        object:

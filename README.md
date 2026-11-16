@@ -147,6 +147,9 @@ data:
   verify: true         # optional, default true
   critical: false      # optional, default false
   max_attempts: 3      # optional, overrides the configured default
+  alternates:          # optional, per speaker, tried in order
+    media_player.sonosroam:
+      - media_player.kitchen
 ```
 
 | Field | Required | Description |
@@ -161,6 +164,7 @@ data:
 | `verify` | no | Confirm playback before reporting a speaker as played (default `true`). |
 | `critical` | no | Retry silent speakers and raise an error unless everything was delivered (default `false`). |
 | `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
+| `alternates` | no | Per speaker in `players`, the speakers to play on instead, in order, when it is offline or cannot play media. A speaker with alternates moves on at once instead of waiting to retry, and no speaker plays a message twice. A key that is not in `players` is an error. |
 
 Calling with no players *and* no notify targets is an error — this service never
 succeeds at doing nothing.

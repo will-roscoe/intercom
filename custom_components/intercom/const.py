@@ -44,6 +44,7 @@ ATTR_RESTORE_VOLUME: Final = "restore_volume"
 ATTR_CRITICAL: Final = "critical"
 ATTR_VERIFY: Final = "verify"
 ATTR_MAX_ATTEMPTS: Final = "max_attempts"
+ATTR_ALTERNATES: Final = "alternates"
 
 # Fired on the HA event bus after every broadcast so cards/automations can react.
 # NOTE: only admins may subscribe to custom events over the websocket API, so the

@@ -7,7 +7,7 @@ import asyncio
 from helpers import SONOS, STUDY, always_fails, new_hass, speaks_on
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
-from intercom import BROADCAST_SCHEMA, _async_broadcast
+from intercom import BROADCAST_SCHEMA, _async_broadcast, _build_request
 import pytest
 import voluptuous as vol
 
@@ -191,3 +191,47 @@ def test_the_result_is_stored_for_replay():
 def test_schema_rejects_a_bad_entity_id():
     with pytest.raises(vol.Invalid):
         BROADCAST_SCHEMA({"message": "hi", "players": ["not-an-entity"]})
+
+
+# --- alternates ----------------------------------------------------------------
+
+LOUNGE = "media_player.lounge"
+
+
+def test_alternates_are_ordered_deduplicated_and_never_self():
+    request = _build_request(
+        OPTIONS,
+        call(
+            message="hi",
+            players=[SONOS],
+            alternates={SONOS: [STUDY, STUDY, SONOS, LOUNGE]},
+        ),
+    )
+    assert request.alternates == {SONOS: (STUDY, LOUNGE)}
+
+
+def test_alternates_for_a_speaker_not_in_players_is_an_error():
+    with pytest.raises(HomeAssistantError, match=LOUNGE):
+        _build_request(
+            OPTIONS,
+            call(message="hi", players=[SONOS], alternates={LOUNGE: [STUDY]}),
+        )
+
+
+def test_no_alternates_means_an_empty_mapping():
+    request = _build_request(OPTIONS, call(message="hi", players=[SONOS]))
+    assert request.alternates == {}
+
+
+def test_schema_accepts_alternates_as_a_list_or_a_single_entity():
+    data = BROADCAST_SCHEMA(
+        {"message": "hi", "players": [SONOS], "alternates": {SONOS: STUDY}}
+    )
+    assert data["alternates"] == {SONOS: [STUDY]}
+
+
+def test_schema_rejects_a_bad_alternate_entity_id():
+    with pytest.raises(vol.Invalid):
+        BROADCAST_SCHEMA(
+            {"message": "hi", "players": [SONOS], "alternates": {SONOS: ["nope"]}}
+        )
