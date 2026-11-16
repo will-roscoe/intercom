@@ -530,29 +530,39 @@ async def async_run_players(
             outcomes.append(outcome)
         return outcomes
 
-    # One speak task per player, shared by everything that needs its result.
-    # Speak tasks never wait on each other, so two players listed as each
-    # other's alternate cannot deadlock. Readers copy an outcome before
-    # changing it, so a chain always sees what a player itself did.
+    # One speak task per player, shared by everything that needs its result,
+    # and created by whichever step first needs it, so cancelling the
+    # broadcast reaches it through the step awaiting it. Speak tasks never wait
+    # on each other, so two players listed as each other's alternate cannot
+    # deadlock. Readers copy an outcome before changing it, so a chain always
+    # sees what a player itself did.
     started: dict[str, asyncio.Future[dict[str, Any]]] = {}
     # Rows for alternates that were not requested, in the order chains reached
     # them; None until the chain that started one knows whether it gets a row.
     extra: dict[str, dict[str, Any] | None] = {}
 
-    def speak(entity_id: str, wait_when_offline: bool) -> tuple[asyncio.Future, bool]:
-        """Return the player's speak task, and whether this call started it."""
+    def speak(entity_id: str) -> tuple[asyncio.Future, bool]:
+        """Return the player's speak task, and whether the caller owns its row.
+
+        Only a requested player without alternates waits out offline retries.
+        The caller owns the row of an unrequested player whose task it started.
+        """
         if entity_id in started:
             return started[entity_id], False
+        requested = entity_id in request.players
         started[entity_id] = asyncio.ensure_future(
-            _async_speak_isolated(hass, request, entity_id, wait_when_offline)
+            _async_speak_isolated(
+                hass,
+                request,
+                entity_id,
+                requested and entity_id not in request.alternates,
+            )
         )
-        return started[entity_id], True
-
-    for entity_id in request.players:
-        speak(entity_id, wait_when_offline=entity_id not in request.alternates)
+        return started[entity_id], not requested
 
     async def run_one(entity_id: str) -> dict[str, Any]:
-        outcome = dict(await started[entity_id])
+        task, _ = speak(entity_id)
+        outcome = dict(await task)
         if outcome["status"] in FALLBACK_STATUSES:
             await _async_follow_alternates(
                 hass, request.alternates.get(entity_id, ()), outcome, speak, extra
@@ -560,9 +570,15 @@ async def async_run_players(
         return outcome
 
     templates = [_new_player_outcome(hass, p) for p in request.players]
-    outcomes = await _async_gather_outcomes(
-        [run_one(p) for p in request.players], templates
-    )
+    try:
+        outcomes = await _async_gather_outcomes(
+            [run_one(p) for p in request.players], templates
+        )
+    finally:
+        # The speak tasks are not children of the gather, so cancelling the
+        # broadcast (an automation restarted mid-call) must stop them here.
+        for task in started.values():
+            task.cancel()
     return outcomes + [row for row in extra.values() if row is not None]
 
 
@@ -570,7 +586,7 @@ async def _async_follow_alternates(
     hass: HomeAssistant,
     alternates: tuple[str, ...],
     outcome: dict[str, Any],
-    speak: Callable[[str, bool], tuple[asyncio.Future, bool]],
+    speak: Callable[[str], tuple[asyncio.Future, bool]],
     extra: dict[str, dict[str, Any] | None],
 ) -> None:
     """Try ``outcome``'s alternates in order, recording the result on it.
@@ -579,15 +595,14 @@ async def _async_follow_alternates(
     :param alternates: the player's alternates, in order; may be empty.
     :param outcome: the player's own outcome (a copy); its ``status``,
         ``rerouted_to``, ``error`` and ``detail`` are updated in place.
-    :param speak: ``speak(entity_id, wait_when_offline)`` from
-        :func:`async_run_players`: the player's shared speak task, and whether
-        that call started it.
+    :param speak: ``speak(entity_id)`` from :func:`async_run_players`: the
+        player's shared speak task, and whether this chain owns its row.
     :param extra: rows for unrequested alternates; one this chain starts and
         ends on gets its row here.
     """
     tried: list[str] = []
     for alt in alternates:
-        task, is_new = speak(alt, False)
+        task, is_new = speak(alt)
         if is_new:
             extra[alt] = None
         alt_outcome = await task

@@ -7,6 +7,7 @@ claiming success for audio nobody heard.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from helpers import (
     ENGINE,
@@ -635,3 +636,20 @@ def test_dead_engine_never_tries_alternates():
     hass, outcomes = run(scenario())
     assert [o["status"] for o in outcomes] == ["failed"]
     assert spoken_to(hass) == []
+
+
+def test_cancelling_a_broadcast_stops_its_speakers():
+    """An automation restarted mid-broadcast must not leave speakers talking."""
+
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, speaks_on(SONOS))
+        task = asyncio.ensure_future(async_run_players(hass, make_request(), True))
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.3)
+        return hass
+
+    assert spoken_to(run(scenario())) == []
