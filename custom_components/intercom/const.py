@@ -70,9 +70,15 @@ STATUS_UNSUPPORTED: Final = "unsupported"
 STATUS_SILENT: Final = "silent"
 # Notify target delivered / not delivered.
 STATUS_SENT: Final = "sent"
+# The speaker could not play, and one of its alternates delivered the message
+# instead (``rerouted_to`` names which).
+STATUS_REROUTED: Final = "rerouted"
 
 # Statuses that mean the message definitely reached someone.
-DELIVERED_STATUSES: Final = frozenset({STATUS_PLAYED, STATUS_SENT})
+DELIVERED_STATUSES: Final = frozenset({STATUS_PLAYED, STATUS_SENT, STATUS_REROUTED})
+# Statuses after which a speaker's alternates are tried: nothing came out, and
+# nothing could have, so playing elsewhere cannot repeat the message.
+FALLBACK_STATUSES: Final = frozenset({STATUS_OFFLINE, STATUS_UNSUPPORTED})
 
 # States that mean "don't try to play here".
 UNAVAILABLE_STATES: Final = frozenset({"unavailable", "unknown", "none", ""})
