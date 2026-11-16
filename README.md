@@ -92,6 +92,8 @@ default_volume: 40
 players:
   - entity: media_player.sonosroam
     name: Sonos Roam
+    alternates:          # optional: played on instead when the Roam is off
+      - media_player.kitchen
 notify:
   - service: notify.mobile_app_phone
     name: My Phone
@@ -102,7 +104,7 @@ notify:
 | Card option | Default | Meaning |
 | --- | --- | --- |
 | `title` | – | Card header. |
-| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`. |
+| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`, and optional `alternates`: speakers to play on instead, in order, when this one is offline or cannot play media. An offline speaker's chip names the alternate it will use, and the result shows it as e.g. "Sonos Roam → Kitchen". |
 | `notify` | – | Notify targets to offer. `service` + optional `name`. |
 | `default_volume` | `40` | Initial slider value (0–100). |
 | `show_volume` | `true` | Hide the slider with `false`. |
