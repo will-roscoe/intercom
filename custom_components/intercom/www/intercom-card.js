@@ -142,10 +142,13 @@ class IntercomCard extends HTMLElement {
       .map((entity) => ({ entity }));
   }
 
-  // A speaker's configured alternates, in order; [] when it has none.
+  // A speaker's configured alternates, in order; [] when it has none. A single
+  // entity may be given as a string, as the service accepts.
   _alternates(entity) {
     const item = this._players().find((p) => p.entity === entity);
-    return item && Array.isArray(item.alternates) ? item.alternates : [];
+    const alts = item && item.alternates;
+    if (typeof alts === "string") return [alts];
+    return Array.isArray(alts) ? alts : [];
   }
 
   // A speaker's label, using its card config name when it has one.
