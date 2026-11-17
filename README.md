@@ -24,6 +24,9 @@ helpers unless you want to.
 - **Bundled Lovelace card** (`custom:intercom-card`) — message box, speaker
   checkboxes, volume slider, notify checkboxes, Broadcast button. Auto-registered;
   no HACS frontend resource to add.
+- **One message at a time per speaker** — two broadcasts to the same speaker
+  (say, from two people at once) take turns in the order they arrived instead
+  of talking over each other. Different speakers still play at the same time.
 - **Confirmed playback, not assumed playback** — a speaker is only reported as
   `played` when Home Assistant actually saw it start playing. "It said it worked
   but nothing came out" becomes an explicit `unverified` result instead of a

@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CRITICAL_MIN_VOLUME,
+    DATA_SPEAKER_LOCKS,
     DELIVERED_STATUSES,
     FALLBACK_STATUSES,
     FEATURE_PLAY_MEDIA,
@@ -542,11 +543,17 @@ async def _async_speak_isolated(
     entity_id: str,
     wait_when_offline: bool,
 ) -> dict[str, Any]:
-    """Speak on one player; an unexpected crash becomes a ``failed`` outcome."""
+    """Speak on one player; an unexpected crash becomes a ``failed`` outcome.
+
+    A player plays one message at a time: a second broadcast to the same
+    player waits for the first to finish, in the order they arrived.
+    """
+    locks: dict[str, asyncio.Lock] = hass.data.setdefault(DATA_SPEAKER_LOCKS, {})
     try:
-        return await _async_speak_on_player(
-            hass, request, entity_id, wait_when_offline=wait_when_offline
-        )
+        async with locks.setdefault(entity_id, asyncio.Lock()):
+            return await _async_speak_on_player(
+                hass, request, entity_id, wait_when_offline=wait_when_offline
+            )
     except Exception as err:  # noqa: BLE001 - one speaker must not sink the rest
         _LOGGER.exception("intercom: unexpected error broadcasting to %s", entity_id)
         outcome = _new_player_outcome(hass, entity_id)
