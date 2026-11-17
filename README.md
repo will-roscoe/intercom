@@ -84,6 +84,7 @@ can be overridden per service call:
 | Chime before every message | off | Play a chime on each speaker before the message. Cards and service calls can switch it per broadcast or per speaker. |
 | Chime sound | bundled chime | A URL or media-source ID to play instead of the bundled two-note chime. |
 | Pause after the chime | 1.5 s | How long to wait after starting the chime before speaking; set it a little longer than your chime. |
+| Held messages expire after | never | Hours a held message may wait. An expired one is dropped and reported in a notification. |
 
 ---
 
@@ -118,6 +119,7 @@ notify:
 | `show_critical` | `false` | Show a **Critical** toggle beside the Broadcast button. |
 | `critical` | `false` | With `show_critical`, where that toggle starts. Without it, every broadcast from this card is critical. |
 | `chime` | integration setting | `true`/`false`: chime before the message on every speaker from this card. A speaker entry's own `chime` overrides it. Leave both out to use the integration setting. |
+| `holds` | – | "Hold until" choices: a list of `name` + `conditions` (as in an automation). Picking one holds the message until the conditions are met. Held messages, from anyone, are listed under the result with a **Cancel** button. |
 
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
 broadcast. After each broadcast the card lists every target and what happened to
@@ -175,6 +177,8 @@ data:
 | `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
 | `alternates` | no | Per speaker in `players`, the speakers to play on instead, in order, when it is offline or cannot play media. The speaker gets its normal retries first; an alternate that is offline is passed over at once. No speaker plays a message twice. A key that is not in `players` is an error. |
 | `chime` | no | Play a chime before the message: `true`/`false` for every speaker, or a list of speakers. A chosen speaker's alternates chime too. Left out, the integration setting decides. A listed speaker that is not in `players` is an error. A chime that fails is a warning on that speaker, never a reason to skip the message. |
+| `hold` | no | Conditions, as in an automation's `conditions:`, that must all be true before the message goes. Already true: sent now. Otherwise held, across restarts, and sent when they become true. See [Holding a message](#holding-a-message). |
+| `hold_label` | no | What the message waits for, shown as "held until …". |
 
 Calling with no players *and* no notify targets is an error — this service never
 succeeds at doing nothing.
@@ -374,6 +378,37 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 `button-card` layout.
 
 ---
+
+## Holding a message
+
+Give a broadcast `hold` conditions and it waits until they are all true:
+
+```yaml
+action: intercom.broadcast
+data:
+  message: "Your parcel came"
+  players: [media_player.kitchen]
+  hold:
+    - condition: state
+      entity_id: person.will
+      state: home
+  hold_label: Will is home
+```
+
+- Conditions use the format of an automation's `conditions:` (state, numeric
+  state, template, time, `and`/`or`/`not`, ...). If they are already true, the
+  message goes now.
+- A held message survives a restart. It is re-checked whenever an entity its
+  conditions name changes, and every minute for templates and time.
+- The call returns at once with `held: true`, an `id`, and a `summary` such as
+  `held until Will is home`. The broadcast result arrives when it is sent, as
+  for any other broadcast.
+- Messages released together go in the order they were held, and each speaker
+  plays one message at a time.
+- The card lists held messages with a **Cancel** button, and its `holds`
+  option offers your conditions as "Hold until" choices.
+- With **Held messages expire after** set, a message that waits longer is
+  dropped and reported in a notification instead of being sent late.
 
 ## Limitations
 
