@@ -111,12 +111,19 @@ def test_card_is_served_and_registered_under_the_same_name():
     assert (COMPONENT / "www" / filename).is_file()
 
 
-def test_card_version_matches_the_manifest():
-    """The card logs its own version; a stale one misreports what is running."""
+def test_card_version_comes_from_the_manifest():
+    """The card takes its version from the ``?v=`` frontend.py serves it with.
+
+    Releases write the version into manifest.json only, so a literal in the
+    card would go stale.
+    """
     constants = (COMPONENT / "const.py").read_text()
     filename = re.search(r'CARD_FILENAME: Final = "([^"]+)"', constants).group(1)
     card = (COMPONENT / "www" / filename).read_text()
-    card_version = re.search(r'const VERSION = "([^"]+)"', card).group(1)
-    assert (
-        card_version == json.loads((COMPONENT / "manifest.json").read_text())["version"]
+    assert not re.search(r'const VERSION\s*=\s*["\']', card), "hardcoded card version"
+    assert re.search(
+        r'const VERSION\s*=\s*new URL\(import\.meta\.url\)\.searchParams\.get\("v"\)',
+        card,
     )
+    frontend = (COMPONENT / "frontend.py").read_text()
+    assert 'f"{CARD_URL}?v={version}"' in frontend
