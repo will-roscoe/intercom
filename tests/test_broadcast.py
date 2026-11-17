@@ -455,19 +455,36 @@ def test_offline_speaker_plays_on_its_alternate():
     assert rows[STUDY]["alternate_for"] == SONOS
 
 
-def test_a_speaker_with_alternates_does_not_wait_to_retry():
+def test_a_speaker_retries_before_switching_to_its_alternates():
     async def scenario():
         hass = new_hass()
         hass.states.set(SONOS, "unavailable", {"supported_features": 512})
         register_speak(hass, speaks_on(STUDY))
         request = make_request(alternates={SONOS: (STUDY,)}, max_attempts=2)
-        started = asyncio.get_running_loop().time()
-        outcomes = await async_run_players(hass, request, True)
-        return outcomes, asyncio.get_running_loop().time() - started
+        return await async_run_players(hass, request, True)
 
-    outcomes, elapsed = run(scenario())
-    assert elapsed < 1.0  # the retry delay alone is 1.5 s
-    assert by_entity(outcomes)[SONOS]["attempts"] == 1
+    sonos = by_entity(run(scenario()))[SONOS]
+    assert sonos["attempts"] == 2
+    assert sonos["rerouted_to"] == STUDY
+
+
+def test_a_speaker_back_within_its_retry_plays_itself():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on(SONOS, STUDY))
+
+        async def comes_back():
+            await asyncio.sleep(0.5)
+            hass.states.set(SONOS, "idle", {"supported_features": 512 | 4 | 8})
+
+        asyncio.ensure_future(comes_back())
+        request = make_request(alternates={SONOS: (STUDY,)}, max_attempts=2)
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    assert by_entity(outcomes)[SONOS]["status"] == "played"
+    assert STUDY not in spoken_to(hass)
 
 
 def test_offline_without_alternates_still_retries():
