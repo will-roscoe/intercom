@@ -225,6 +225,34 @@ def _playable_url(hass: HomeAssistant, media: str) -> str:
         return media
 
 
+async def _async_prepare_speech(hass: HomeAssistant, request: BroadcastRequest) -> None:
+    """Have the TTS engine make the message now, before any speaker is asked.
+
+    The audio lands in Home Assistant's TTS cache, the same one ``tts.speak``
+    with ``cache: true`` reads, so every speaker (and every retry or alternate)
+    is served the finished file at once. Giving up after ``request.wait_timeout``
+    or on any error is logged and otherwise ignored: the speakers then wait for
+    the engine themselves.
+    """
+    try:
+        from homeassistant.components import tts
+    except ImportError:  # pragma: no cover - Home Assistant always has tts
+        return
+    try:
+        async with asyncio.timeout(request.wait_timeout):
+            media_id = tts.generate_media_source_id(
+                hass, request.message, engine=request.engine, cache=True
+            )
+            await tts.async_get_media_source_audio(hass, media_id)
+    except Exception as err:  # noqa: BLE001 - the speakers can still make it
+        _LOGGER.warning(
+            "intercom: could not prepare the speech in advance (%s); "
+            "speakers will wait for %s",
+            _error_text(err),
+            request.engine,
+        )
+
+
 async def _async_chime(
     hass: HomeAssistant,
     request: BroadcastRequest,
@@ -595,6 +623,11 @@ async def async_run_players(
             outcome["error"] = f"TTS engine {request.engine} is unavailable"
             outcomes.append(outcome)
         return outcomes
+
+    # A speaker that waits for the engine mid-announcement stutters (Music
+    # Assistant), leaves a long silence after the chime, or starts after the
+    # playback check has given up.
+    await _async_prepare_speech(hass, request)
 
     # One speak task per player, shared by everything that needs its result,
     # and created by whichever step first needs it, so cancelling the
