@@ -258,8 +258,13 @@ async def _async_report_problems(hass: HomeAssistant, result: dict) -> None:
         return
 
     lines: list[str] = [result["summary"], ""]
+    names = {o["entity_id"]: o["name"] for o in result["players"]}
     for outcome in result["players"]:
-        bits = [f"- {outcome['name']} ({outcome['entity_id']}): {outcome['status']}"]
+        head = f"- {outcome['name']} ({outcome['entity_id']}): {outcome['status']}"
+        stood_in_for = outcome.get("alternate_for")
+        if stood_in_for:
+            head += f", alternate for {names.get(stood_in_for, stood_in_for)}"
+        bits = [head]
         if outcome["error"]:
             bits.append(f"  {outcome['error']}")
         if outcome["detail"]:

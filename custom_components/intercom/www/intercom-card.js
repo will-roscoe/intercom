@@ -178,6 +178,14 @@ class IntercomCard extends HTMLElement {
     return !st || ["unavailable", "unknown", "none", ""].includes(st.state);
   }
 
+  // Whether a speaker could take a message now: online and able to play media
+  // (supported_features PLAY_MEDIA, 512), as the integration checks.
+  _canPlay(entity) {
+    if (this._isOffline(entity)) return false;
+    const features = this._hass.states[entity].attributes.supported_features;
+    return ((features || 0) & 512) !== 0;
+  }
+
   // --- rendering -------------------------------------------------------------
 
   _render() {
@@ -370,7 +378,7 @@ class IntercomCard extends HTMLElement {
       const offline = this._isOffline(chip.dataset.id);
       chip.classList.toggle("offline", offline);
       const standIn = offline
-        ? this._alternates(chip.dataset.id).find((a) => !this._isOffline(a))
+        ? this._alternates(chip.dataset.id).find((a) => this._canPlay(a))
         : undefined;
       chip.title = !offline
         ? ""
