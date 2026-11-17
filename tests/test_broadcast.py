@@ -672,6 +672,103 @@ def test_cancelling_a_broadcast_stops_its_speakers():
     assert spoken_to(run(scenario())) == []
 
 
+# --- chime ---------------------------------------------------------------------
+
+CHIME = "/intercom/chime.mp3"
+
+
+def register_play_media(hass, fail: bool = False) -> None:
+    async def play_media(hass_, data):
+        if fail:
+            raise RuntimeError("could not fetch the chime")
+
+    hass.services.register("media_player", "play_media", play_media)
+
+
+def sequence(hass, entity_id: str) -> list[str]:
+    """The chime and speech calls made for one player, in order."""
+    wanted = {("media_player", "play_media"): "chime", ("tts", "speak"): "speak"}
+    return [
+        wanted[call_[:2]]
+        for call_ in hass.services.calls
+        if call_[:2] in wanted
+        and entity_id
+        in (call_[2].get("entity_id"), call_[2].get("media_player_entity_id"))
+    ]
+
+
+def chime_request(**overrides):
+    return make_request(chime=frozenset({SONOS}), chime_media=CHIME, **overrides)
+
+
+def test_the_chime_plays_before_the_message():
+    async def scenario():
+        hass = new_hass()
+        register_play_media(hass)
+        register_speak(hass, speaks_on(SONOS))
+        return hass, await async_run_players(hass, chime_request(), True)
+
+    hass, outcomes = run(scenario())
+    assert outcomes[0]["status"] == "played"
+    assert sequence(hass, SONOS) == ["chime", "speak"]
+    chime = next(
+        c[2] for c in hass.services.calls if c[:2] == ("media_player", "play_media")
+    )
+    assert chime == {
+        "entity_id": SONOS,
+        "media_content_id": CHIME,
+        "media_content_type": "music",
+        "announce": True,
+    }
+
+
+def test_no_chime_on_a_speaker_not_chosen_for_it():
+    async def scenario():
+        hass = new_hass()
+        register_play_media(hass)
+        register_speak(hass, speaks_on(SONOS, STUDY))
+        request = make_request(
+            players=(SONOS, STUDY), chime=frozenset({SONOS}), chime_media=CHIME
+        )
+        return hass, await async_run_players(hass, request, True)
+
+    hass, _ = run(scenario())
+    assert sequence(hass, STUDY) == ["speak"]
+
+
+def test_a_failed_chime_never_blocks_the_message():
+    async def scenario():
+        hass = new_hass()
+        register_play_media(hass, fail=True)
+        register_speak(hass, speaks_on(SONOS))
+        return await async_run_players(hass, chime_request(), True)
+
+    outcome = run(scenario())[0]
+    assert outcome["status"] == "played"
+    assert any("chime" in warning for warning in outcome["warnings"])
+
+
+def test_the_chime_plays_once_across_retries():
+    async def scenario():
+        hass = new_hass()
+        register_play_media(hass)
+        plays = speaks_on(SONOS)
+        tries = []
+
+        async def flaky(hass_, data):
+            tries.append(1)
+            if len(tries) == 1:
+                raise RuntimeError("The command to the player failed.")
+            return await plays(hass_, data)
+
+        register_speak(hass, flaky)
+        return hass, await async_run_players(hass, chime_request(), True)
+
+    hass, outcomes = run(scenario())
+    assert outcomes[0]["status"] == "played"
+    assert sequence(hass, SONOS) == ["chime", "speak", "speak"]
+
+
 # --- one message at a time per speaker ------------------------------------------
 
 

@@ -39,6 +39,7 @@ from .broadcast import (
 )
 from .const import (
     ATTR_ALTERNATES,
+    ATTR_CHIME,
     ATTR_CRITICAL,
     ATTR_ENGINE,
     ATTR_MAX_ATTEMPTS,
@@ -49,12 +50,18 @@ from .const import (
     ATTR_TITLE,
     ATTR_VERIFY,
     ATTR_VOLUME,
+    CHIME_URL,
+    CONF_CHIME,
+    CONF_CHIME_MEDIA,
+    CONF_CHIME_SECONDS,
     CONF_DEFAULT_TITLE,
     CONF_MAX_ATTEMPTS,
     CONF_START_TIMEOUT,
     CONF_TTS_ENGINE,
     CONF_UNMUTE,
     CONF_WAIT_TIMEOUT,
+    DEFAULT_CHIME,
+    DEFAULT_CHIME_SECONDS,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_START_TIMEOUT,
     DEFAULT_TITLE,
@@ -92,6 +99,10 @@ BROADCAST_SCHEMA = vol.Schema(
         vol.Optional(ATTR_ALTERNATES, default=dict): {
             cv.entity_id: vol.All(cv.ensure_list, [cv.entity_id])
         },
+        # true/false for every speaker, or the speakers that get the chime.
+        vol.Optional(ATTR_CHIME): vol.Any(
+            cv.boolean, vol.All(cv.ensure_list, [cv.entity_id])
+        ),
     }
 )
 
@@ -167,7 +178,43 @@ def _build_request(options: dict, call: ServiceCall) -> BroadcastRequest:
         wait_timeout=float(options.get(CONF_WAIT_TIMEOUT, DEFAULT_WAIT_TIMEOUT)),
         start_timeout=float(options.get(CONF_START_TIMEOUT, DEFAULT_START_TIMEOUT)),
         alternates=alternates,
+        chime=_chimed(call.data.get(ATTR_CHIME), options, players, alternates),
+        chime_media=options.get(CONF_CHIME_MEDIA) or CHIME_URL,
+        chime_seconds=float(options.get(CONF_CHIME_SECONDS, DEFAULT_CHIME_SECONDS)),
     )
+
+
+def _chimed(
+    given: bool | list[str] | None,
+    options: dict,
+    players: list[str],
+    alternates: dict[str, tuple[str, ...]],
+) -> frozenset[str]:
+    """Return the players that get a chime, with the alternates of each.
+
+    :param given: the call's ``chime``: true/false for every player, a list of
+        players, or None to use the integration's ``chime`` option.
+    :param options: the entry's options.
+    :param players: the requested players.
+    :param alternates: requested player -> its alternates (already cleaned).
+    :returns: every chosen player plus its alternates, since an alternate
+        stands in for the speaker it covers.
+    :raises HomeAssistantError: a listed player is not one of ``players``.
+    """
+    if given is None:
+        given = bool(options.get(CONF_CHIME, DEFAULT_CHIME))
+    if given is True:
+        chosen = list(players)
+    elif given is False:
+        chosen = []
+    else:
+        unknown = [entity for entity in given if entity not in players]
+        if unknown:
+            raise HomeAssistantError(
+                f"chime given for {', '.join(unknown)}, which is not in players"
+            )
+        chosen = list(given)
+    return frozenset(entity for p in chosen for entity in (p, *alternates.get(p, ())))
 
 
 def _alternates(

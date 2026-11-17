@@ -109,3 +109,12 @@ broadcast:
       example: '{"media_player.kitchen": ["media_player.lounge"]}'
       selector:
         object:
+    chime:
+      name: Chime
+      description: >-
+        Play a chime before the message: true or false for every speaker, or (in
+        YAML) a list of speakers. Their alternates chime too. Leave out to use
+        the integration setting.
+      required: false
+      selector:
+        boolean:

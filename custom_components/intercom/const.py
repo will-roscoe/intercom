@@ -13,6 +13,9 @@ CONF_WAIT_TIMEOUT: Final = "wait_timeout"
 CONF_START_TIMEOUT: Final = "start_timeout"
 CONF_MAX_ATTEMPTS: Final = "max_attempts"
 CONF_UNMUTE: Final = "unmute"
+CONF_CHIME: Final = "chime"
+CONF_CHIME_MEDIA: Final = "chime_media"
+CONF_CHIME_SECONDS: Final = "chime_seconds"
 
 # Defaults
 DEFAULT_TTS_ENGINE: Final = "tts.piper"
@@ -24,6 +27,11 @@ DEFAULT_WAIT_TIMEOUT: Final = 30
 DEFAULT_START_TIMEOUT: Final = 8
 DEFAULT_MAX_ATTEMPTS: Final = 2
 DEFAULT_UNMUTE: Final = True
+# Chime before the message: off unless the integration, card or call asks.
+DEFAULT_CHIME: Final = False
+# Pause after the chime before speaking: the bundled chime's length plus a
+# margin, so the chime has finished before the playback check starts.
+DEFAULT_CHIME_SECONDS: Final = 1.5
 
 # Delay after setting volume so the level is applied before audio starts.
 VOLUME_SETTLE_SECONDS: Final = 0.4
@@ -45,6 +53,7 @@ ATTR_CRITICAL: Final = "critical"
 ATTR_VERIFY: Final = "verify"
 ATTR_MAX_ATTEMPTS: Final = "max_attempts"
 ATTR_ALTERNATES: Final = "alternates"
+ATTR_CHIME: Final = "chime"
 
 # Fired on the HA event bus after every broadcast so cards/automations can react.
 # NOTE: only admins may subscribe to custom events over the websocket API, so the
@@ -97,6 +106,9 @@ WS_TYPE_SUBSCRIBE_RESULT: Final = f"{DOMAIN}/subscribe_result"
 
 # Frontend card
 URL_BASE: Final = "/intercom"
+# The bundled chime, served from the integration package (www/).
+CHIME_FILENAME: Final = "chime.mp3"
+CHIME_URL: Final = f"{URL_BASE}/{CHIME_FILENAME}"
 CARD_FILENAME: Final = "intercom-card.js"
 
 # Marker in hass.data so we only register static paths / JS once per HA run.

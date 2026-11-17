@@ -81,6 +81,9 @@ can be overridden per service call:
 | Max seconds to wait for playback to start | `8` | How long a speaker gets to show *any* sign of playing before the result is reported as `unverified`. Sonos needs several seconds to buffer. |
 | Attempts per target | `2` | How many times each speaker or notify target is tried before it is reported as failed. |
 | Unmute muted speakers | on | A muted speaker accepts an announcement and plays it silently; unmuting first (and re-muting after) prevents that. Switching it off does not hide the problem — such a speaker is reported `silent`. A `critical` broadcast unmutes regardless. |
+| Chime before every message | off | Play a chime on each speaker before the message. Cards and service calls can switch it per broadcast or per speaker. |
+| Chime sound | bundled chime | A URL or media-source ID to play instead of the bundled two-note chime. |
+| Pause after the chime | 1.5 s | How long to wait after starting the chime before speaking; set it a little longer than your chime. |
 
 ---
 
@@ -114,6 +117,7 @@ notify:
 | `volume_step` | `5` | Slider step. |
 | `show_critical` | `false` | Show a **Critical** toggle beside the Broadcast button. |
 | `critical` | `false` | With `show_critical`, where that toggle starts. Without it, every broadcast from this card is critical. |
+| `chime` | integration setting | `true`/`false`: chime before the message on every speaker from this card. A speaker entry's own `chime` overrides it. Leave both out to use the integration setting. |
 
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
 broadcast. After each broadcast the card lists every target and what happened to
@@ -170,6 +174,7 @@ data:
 | `critical` | no | Retry silent speakers and raise an error unless everything was delivered (default `false`). |
 | `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
 | `alternates` | no | Per speaker in `players`, the speakers to play on instead, in order, when it is offline or cannot play media. The speaker gets its normal retries first; an alternate that is offline is passed over at once. No speaker plays a message twice. A key that is not in `players` is an error. |
+| `chime` | no | Play a chime before the message: `true`/`false` for every speaker, or a list of speakers. A chosen speaker's alternates chime too. Left out, the integration setting decides. A listed speaker that is not in `players` is an error. A chime that fails is a warning on that speaker, never a reason to skip the message. |
 
 Calling with no players *and* no notify targets is an error — this service never
 succeeds at doing nothing.
