@@ -447,6 +447,14 @@ URL with no `Content-Length`. Sonos accepts the play command (so it looks like i
 worked) but silently plays nothing. With `cache: true`, Piper renders the whole
 clip to a stable cached file the speaker will play. This integration always sets it.
 
+It also has the engine make the message before any speaker is asked to play it,
+so every speaker, retry and alternate fetches the finished file. Made on demand,
+a slow engine (Piper can take 10 to 20 seconds per sentence on a small host)
+keeps the speaker waiting mid-announcement: Music Assistant stutters, the chime is
+followed by a long silence, and the speech can start after the playback check has
+given up. The first sound therefore comes once the speech is ready; phone
+notifications are not held up by it.
+
 ---
 
 ## Development

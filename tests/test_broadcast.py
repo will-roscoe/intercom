@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 
 from helpers import (
     ENGINE,
@@ -767,6 +768,87 @@ def test_the_chime_plays_once_across_retries():
     hass, outcomes = run(scenario())
     assert outcomes[0]["status"] == "played"
     assert sequence(hass, SONOS) == ["chime", "speak", "speak"]
+
+
+# --- speech made before any speaker plays ---------------------------------------
+#
+# A TTS engine like Piper on a small host takes 10-20 s per sentence. Made on
+# demand, a speaker waits mid-announcement: Music Assistant stutters, the chime
+# is followed by a long silence, and the speech can start after the playback
+# check has given up.
+
+
+def test_the_message_is_made_before_any_speaker_is_asked():
+    async def scenario():
+        hass = new_hass()
+        register_play_media(hass)
+        register_speak(hass, speaks_on(SONOS))
+        return hass, await async_run_players(hass, chime_request(), True)
+
+    hass, outcomes = run(scenario())
+    assert outcomes[0]["status"] == "played"
+    assert hass.data["tts_made"] == [
+        {
+            "engine": ENGINE,
+            "message": "Dinner is ready",
+            "cache": True,
+            "calls_before": 0,
+        }
+    ]
+
+
+def test_the_message_is_made_once_for_every_speaker():
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, speaks_on(SONOS, STUDY))
+        request = make_request(players=(SONOS, STUDY))
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    assert [o["status"] for o in outcomes] == ["played", "played"]
+    assert len(hass.data["tts_made"]) == 1
+
+
+def test_a_message_that_cannot_be_made_early_is_still_spoken():
+    async def scenario():
+        hass = new_hass()
+
+        async def broken():
+            raise RuntimeError("engine hiccup")
+
+        hass.data["tts_make"] = broken
+        register_speak(hass, speaks_on(SONOS))
+        return hass, await async_run_players(hass, make_request(), True)
+
+    hass, outcomes = run(scenario())
+    assert outcomes[0]["status"] == "played"
+    assert spoken_to(hass) == [SONOS]
+
+
+def test_making_the_message_early_is_bounded():
+    async def scenario():
+        hass = new_hass()
+
+        async def slow():
+            await asyncio.sleep(10)
+
+        hass.data["tts_make"] = slow
+        register_speak(hass, speaks_on(SONOS))
+        return await async_run_players(hass, make_request(wait_timeout=0.3), True)
+
+    t0 = time.monotonic()
+    outcomes = run(scenario())
+    assert outcomes[0]["status"] == "played"
+    assert time.monotonic() - t0 < 3
+
+
+def test_nothing_is_made_when_the_engine_is_unavailable():
+    async def scenario():
+        hass = new_hass()
+        return hass, await async_run_players(hass, make_request(), False)
+
+    hass, _ = run(scenario())
+    assert "tts_made" not in hass.data
 
 
 # --- one message at a time per speaker ------------------------------------------
