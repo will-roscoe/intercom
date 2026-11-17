@@ -788,7 +788,12 @@ def test_the_message_is_made_before_any_speaker_is_asked():
     hass, outcomes = run(scenario())
     assert outcomes[0]["status"] == "played"
     assert hass.data["tts_made"] == [
-        {"engine": ENGINE, "message": "Dinner is ready", "cache": True, "calls_before": 0}
+        {
+            "engine": ENGINE,
+            "message": "Dinner is ready",
+            "cache": True,
+            "calls_before": 0,
+        }
     ]
 
 
