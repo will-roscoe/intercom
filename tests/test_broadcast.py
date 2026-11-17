@@ -7,6 +7,7 @@ claiming success for audio nobody heard.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from helpers import (
     ENGINE,
@@ -302,7 +303,7 @@ def test_an_unexpected_crash_becomes_an_outcome():
     async def scenario():
         from intercom import broadcast
 
-        async def boom(hass_, request, entity_id):
+        async def boom(hass_, request, entity_id, **_):
             raise ValueError("kaboom")
 
         original = broadcast._async_speak_on_player
@@ -404,3 +405,251 @@ def test_verify_off_never_contacts_the_speaker(monkeypatch):
     assert outcome["status"] == "sent"
     assert outcome["verified_by"] is None
     assert "verification disabled" in outcome["detail"]
+
+
+# --- alternates ----------------------------------------------------------------
+
+LOUNGE = "media_player.lounge"
+
+
+def add_lounge(hass, state: str = "idle") -> None:
+    hass.states.set(
+        LOUNGE, state, {"friendly_name": "Lounge", "supported_features": 512 | 4 | 8}
+    )
+
+
+def spoken_to(hass) -> list[str]:
+    return [
+        call_[2]["media_player_entity_id"]
+        for call_ in hass.services.calls
+        if call_[:2] == ("tts", "speak")
+    ]
+
+
+def fails_on(failing: str, *playing: str):
+    """A tts.speak that raises for one player and really plays on others."""
+    plays = speaks_on(*playing)
+
+    async def speak(hass_, data):
+        if data["media_player_entity_id"] == failing:
+            raise RuntimeError("The command to the player failed.")
+        return await plays(hass_, data)
+
+    return speak
+
+
+def test_offline_speaker_plays_on_its_alternate():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)})
+        return await async_run_players(hass, request, True)
+
+    outcomes = run(scenario())
+    rows = by_entity(outcomes)
+    assert len(outcomes) == 2
+    assert rows[SONOS]["status"] == "rerouted"
+    assert rows[SONOS]["rerouted_to"] == STUDY
+    assert rows[STUDY]["status"] == "played"
+    assert rows[STUDY]["alternate_for"] == SONOS
+
+
+def test_a_speaker_with_alternates_does_not_wait_to_retry():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)}, max_attempts=2)
+        started = asyncio.get_running_loop().time()
+        outcomes = await async_run_players(hass, request, True)
+        return outcomes, asyncio.get_running_loop().time() - started
+
+    outcomes, elapsed = run(scenario())
+    assert elapsed < 1.0  # the retry delay alone is 1.5 s
+    assert by_entity(outcomes)[SONOS]["attempts"] == 1
+
+
+def test_offline_without_alternates_still_retries():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on())
+        return await async_run_players(hass, make_request(max_attempts=2), True)
+
+    outcome = run(scenario())[0]
+    assert outcome["status"] == "offline"
+    assert outcome["attempts"] == 2
+
+
+def test_unsupported_speaker_falls_back():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "on", {"supported_features": 4})
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)})
+        return await async_run_players(hass, request, True)
+
+    sonos = by_entity(run(scenario()))[SONOS]
+    assert sonos["status"] == "rerouted"
+    assert sonos["rerouted_to"] == STUDY
+
+
+def test_the_chain_skips_offline_and_missing_alternates():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        add_lounge(hass, "unavailable")
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(
+            alternates={SONOS: ("media_player.ghost", LOUNGE, STUDY)}
+        )
+        return await async_run_players(hass, request, True)
+
+    outcomes = run(scenario())
+    rows = by_entity(outcomes)
+    assert rows[SONOS]["rerouted_to"] == STUDY
+    assert set(rows) == {SONOS, STUDY}
+    assert "media_player.ghost" in rows[SONOS]["detail"]
+    assert "Lounge" in rows[SONOS]["detail"]
+
+
+def test_every_alternate_offline_leaves_the_speaker_offline():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        hass.states.set(STUDY, "unavailable", {"friendly_name": "Study"})
+        add_lounge(hass, "unavailable")
+        register_speak(hass, speaks_on())
+        request = make_request(alternates={SONOS: (STUDY, LOUNGE)})
+        return await async_run_players(hass, request, True)
+
+    outcomes = run(scenario())
+    sonos = outcomes[0]
+    assert len(outcomes) == 1
+    assert sonos["status"] == "offline"
+    assert sonos["rerouted_to"] is None
+    assert "Study" in sonos["error"] and "Lounge" in sonos["error"]
+
+
+def test_a_failed_alternate_ends_the_chain():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        add_lounge(hass)
+        register_speak(hass, fails_on(STUDY, LOUNGE))
+        request = make_request(alternates={SONOS: (STUDY, LOUNGE)})
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    rows = by_entity(outcomes)
+    assert rows[SONOS]["status"] == "offline"
+    assert rows[STUDY]["status"] == "failed"
+    assert rows[STUDY]["alternate_for"] == SONOS
+    assert LOUNGE not in spoken_to(hass)
+
+
+def test_a_played_speaker_never_tries_its_alternates():
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, speaks_on(SONOS, STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)})
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    assert len(outcomes) == 1
+    assert STUDY not in spoken_to(hass)
+
+
+def test_a_failed_speaker_never_tries_its_alternates():
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, fails_on(SONOS, STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)}, max_attempts=1)
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    assert outcomes[0]["status"] == "failed"
+    assert STUDY not in spoken_to(hass)
+
+
+def test_an_alternate_that_is_also_requested_plays_once():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(players=(SONOS, STUDY), alternates={SONOS: (STUDY,)})
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    rows = by_entity(outcomes)
+    assert spoken_to(hass).count(STUDY) == 1
+    assert len(outcomes) == 2
+    assert rows[SONOS]["rerouted_to"] == STUDY
+    assert rows[STUDY]["alternate_for"] is None
+
+
+def test_two_speakers_sharing_an_alternate_use_it_once():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        hass.states.set(STUDY, "unavailable", {"supported_features": 512})
+        add_lounge(hass)
+        register_speak(hass, speaks_on(LOUNGE))
+        request = make_request(
+            players=(SONOS, STUDY), alternates={SONOS: (LOUNGE,), STUDY: (LOUNGE,)}
+        )
+        return hass, await async_run_players(hass, request, True)
+
+    hass, outcomes = run(scenario())
+    rows = by_entity(outcomes)
+    assert spoken_to(hass).count(LOUNGE) == 1
+    assert len(outcomes) == 3
+    assert rows[SONOS]["rerouted_to"] == LOUNGE
+    assert rows[STUDY]["rerouted_to"] == LOUNGE
+
+
+def test_mutual_alternates_both_offline_finish():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        hass.states.set(STUDY, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on())
+        request = make_request(
+            players=(SONOS, STUDY), alternates={SONOS: (STUDY,), STUDY: (SONOS,)}
+        )
+        async with asyncio.timeout(3):
+            return await async_run_players(hass, request, True)
+
+    outcomes = run(scenario())
+    assert [o["status"] for o in outcomes] == ["offline", "offline"]
+
+
+def test_dead_engine_never_tries_alternates():
+    async def scenario():
+        hass = new_hass()
+        hass.states.set(SONOS, "unavailable", {"supported_features": 512})
+        register_speak(hass, speaks_on(STUDY))
+        request = make_request(alternates={SONOS: (STUDY,)})
+        return hass, await async_run_players(hass, request, False)
+
+    hass, outcomes = run(scenario())
+    assert [o["status"] for o in outcomes] == ["failed"]
+    assert spoken_to(hass) == []
+
+
+def test_cancelling_a_broadcast_stops_its_speakers():
+    """An automation restarted mid-broadcast must not leave speakers talking."""
+
+    async def scenario():
+        hass = new_hass()
+        register_speak(hass, speaks_on(SONOS))
+        task = asyncio.ensure_future(async_run_players(hass, make_request(), True))
+        await asyncio.sleep(0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.3)
+        return hass
+
+    assert spoken_to(run(scenario())) == []

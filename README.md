@@ -92,6 +92,8 @@ default_volume: 40
 players:
   - entity: media_player.sonosroam
     name: Sonos Roam
+    alternates:          # optional: played on instead when the Roam is off
+      - media_player.kitchen
 notify:
   - service: notify.mobile_app_phone
     name: My Phone
@@ -102,7 +104,7 @@ notify:
 | Card option | Default | Meaning |
 | --- | --- | --- |
 | `title` | – | Card header. |
-| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`. |
+| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`, and optional `alternates`: speakers to play on instead, in order, when this one is offline or cannot play media. An offline speaker's chip names the alternate it will use, and the result shows it as e.g. "Sonos Roam → Kitchen". |
 | `notify` | – | Notify targets to offer. `service` + optional `name`. |
 | `default_volume` | `40` | Initial slider value (0–100). |
 | `show_volume` | `true` | Hide the slider with `false`. |
@@ -147,6 +149,9 @@ data:
   verify: true         # optional, default true
   critical: false      # optional, default false
   max_attempts: 3      # optional, overrides the configured default
+  alternates:          # optional, per speaker, tried in order
+    media_player.sonosroam:
+      - media_player.kitchen
 ```
 
 | Field | Required | Description |
@@ -161,6 +166,7 @@ data:
 | `verify` | no | Confirm playback before reporting a speaker as played (default `true`). |
 | `critical` | no | Retry silent speakers and raise an error unless everything was delivered (default `false`). |
 | `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
+| `alternates` | no | Per speaker in `players`, the speakers to play on instead, in order, when it is offline or cannot play media. A speaker with alternates moves on at once instead of waiting to retry, and no speaker plays a message twice. A key that is not in `players` is an error. |
 
 Calling with no players *and* no notify targets is an error — this service never
 succeeds at doing nothing.
@@ -213,9 +219,18 @@ event) that says what happened to each target individually:
 | `offline` | The entity is missing or `unavailable`; nothing was attempted. |
 | `unsupported` | The entity exists but cannot play media at all. |
 | `sent` | Only with `verify: false` — dispatched, delivery not confirmed. |
+| `rerouted` | The speaker was `offline` or `unsupported`, and one of its [`alternates`](#the-service) delivered the message instead. `rerouted_to` names which; `detail` lists every alternate tried. |
 
 `delivered` is true when at least one target definitely got the message.
-`complete` is true only when *every* requested target did.
+`complete` is true only when *every* requested target did; a `rerouted` speaker
+counts, and the summary names it, e.g. `played on 1/1 speakers (Kitchen via Lounge)`.
+
+An alternate that was not itself requested gets its own entry in `players`, with
+`alternate_for` naming the speaker it stood in for, and appears in the flat
+lists (`played`, `failed`, ...) under its own entity id. `rerouted` lists the
+requested speakers an alternate covered. Alternates skipped because they were
+offline get no entry; they are named in the speaker's `detail`, or in its
+`error` when no alternate could play.
 
 ### Non-admin users
 

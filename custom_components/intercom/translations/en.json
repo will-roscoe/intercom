@@ -89,6 +89,10 @@
         "max_attempts": {
           "name": "Max attempts",
           "description": "How many times to try each target before giving up."
+        },
+        "alternates": {
+          "name": "Alternates",
+          "description": "Per speaker, the speakers to play on instead, in order, when it is offline or cannot play media."
         }
       }
     }

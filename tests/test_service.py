@@ -7,7 +7,7 @@ import asyncio
 from helpers import SONOS, STUDY, always_fails, new_hass, speaks_on
 from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
-from intercom import BROADCAST_SCHEMA, _async_broadcast
+from intercom import BROADCAST_SCHEMA, _async_broadcast, _build_request
 import pytest
 import voluptuous as vol
 
@@ -191,3 +191,93 @@ def test_the_result_is_stored_for_replay():
 def test_schema_rejects_a_bad_entity_id():
     with pytest.raises(vol.Invalid):
         BROADCAST_SCHEMA({"message": "hi", "players": ["not-an-entity"]})
+
+
+# --- alternates ----------------------------------------------------------------
+
+LOUNGE = "media_player.lounge"
+
+
+def test_alternates_are_ordered_deduplicated_and_never_self():
+    request = _build_request(
+        OPTIONS,
+        call(
+            message="hi",
+            players=[SONOS],
+            alternates={SONOS: [STUDY, STUDY, SONOS, LOUNGE]},
+        ),
+    )
+    assert request.alternates == {SONOS: (STUDY, LOUNGE)}
+
+
+def test_alternates_for_a_speaker_not_in_players_is_an_error():
+    with pytest.raises(HomeAssistantError, match=LOUNGE):
+        _build_request(
+            OPTIONS,
+            call(message="hi", players=[SONOS], alternates={LOUNGE: [STUDY]}),
+        )
+
+
+def test_no_alternates_means_an_empty_mapping():
+    request = _build_request(OPTIONS, call(message="hi", players=[SONOS]))
+    assert request.alternates == {}
+
+
+def test_schema_accepts_alternates_as_a_list_or_a_single_entity():
+    data = BROADCAST_SCHEMA(
+        {"message": "hi", "players": [SONOS], "alternates": {SONOS: STUDY}}
+    )
+    assert data["alternates"] == {SONOS: [STUDY]}
+
+
+def test_schema_rejects_a_bad_alternate_entity_id():
+    with pytest.raises(vol.Invalid):
+        BROADCAST_SCHEMA(
+            {"message": "hi", "players": [SONOS], "alternates": {SONOS: ["nope"]}}
+        )
+
+
+def sonos_offline(hass):
+    hass.states.set(
+        SONOS, "unavailable", {"friendly_name": "Sonos", "supported_features": 512}
+    )
+    return hass
+
+
+def test_a_rerouted_broadcast_is_complete_and_says_where_it_played():
+    hass = sonos_offline(with_notify(new_hass()))
+    hass.services.register("tts", "speak", speaks_on(STUDY))
+
+    result = broadcast(hass, message="hi", players=[SONOS], alternates={SONOS: STUDY})
+
+    assert result["complete"] is True
+    assert result["delivered"] is True
+    assert result["rerouted"] == [SONOS]
+    assert result["played"] == [STUDY]
+    assert result["offline"] == []
+    assert result["summary"] == "played on 1/1 speakers (Sonos via Study)"
+    assert notifications(hass) == []
+
+
+def test_critical_does_not_raise_when_reroutes_covered_everything():
+    hass = sonos_offline(with_notify(new_hass()))
+    hass.services.register("tts", "speak", speaks_on(STUDY))
+
+    result = broadcast(
+        hass, message="hi", players=[SONOS], alternates={SONOS: STUDY}, critical=True
+    )
+
+    assert result["complete"] is True
+
+
+def test_a_failed_reroute_is_reported_as_a_problem():
+    hass = sonos_offline(with_notify(new_hass()))
+    hass.services.register("tts", "speak", always_fails())
+
+    result = broadcast(hass, message="hi", players=[SONOS], alternates={SONOS: STUDY})
+
+    assert result["complete"] is False
+    assert result["offline"] == [SONOS]
+    assert result["failed"] == [STUDY]
+    assert result["rerouted"] == []
+    assert "Study" in notifications(hass)[0]["message"]

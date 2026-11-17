@@ -25,6 +25,8 @@
  *   players:                   # optional; auto-discovers media_player.* if omitted
  *     - entity: media_player.sonosroam
  *       name: Sonos Roam
+ *       alternates:            # optional; played on instead, in order, when
+ *         - media_player.kitchen #  this speaker is offline or cannot play
  *   notify:                    # optional
  *     - service: notify.mobile_app_phone
  *       name: My Phone
@@ -37,10 +39,11 @@ const VERSION =
   new URL(import.meta.url).searchParams.get("v") || "unknown";
 
 // Per-target statuses returned by intercom.broadcast.
-const OK_STATUSES = new Set(["played", "sent"]);
+const OK_STATUSES = new Set(["played", "sent", "rerouted"]);
 const STATUS_TEXT = {
   played: "played",
   sent: "sent",
+  rerouted: "rerouted",
   unverified: "no sound detected",
   silent: "muted — not audible",
   failed: "failed",
@@ -137,6 +140,21 @@ class IntercomCard extends HTMLElement {
     return Object.keys(this._hass.states)
       .filter((e) => e.startsWith("media_player."))
       .map((entity) => ({ entity }));
+  }
+
+  // A speaker's configured alternates, in order; [] when it has none. A single
+  // entity may be given as a string, as the service accepts.
+  _alternates(entity) {
+    const item = this._players().find((p) => p.entity === entity);
+    const alts = item && item.alternates;
+    if (typeof alts === "string") return [alts];
+    return Array.isArray(alts) ? alts : [];
+  }
+
+  // A speaker's label, using its card config name when it has one.
+  _playerLabel(entity) {
+    const item = this._players().find((p) => p.entity === entity);
+    return this._label(item || { entity }, "entity");
   }
 
   _notify() {
@@ -351,7 +369,14 @@ class IntercomCard extends HTMLElement {
     for (const chip of this._playerChips.querySelectorAll(".chip")) {
       const offline = this._isOffline(chip.dataset.id);
       chip.classList.toggle("offline", offline);
-      chip.title = offline ? "Currently unavailable — will be skipped" : "";
+      const standIn = offline
+        ? this._alternates(chip.dataset.id).find((a) => !this._isOffline(a))
+        : undefined;
+      chip.title = !offline
+        ? ""
+        : standIn
+          ? `Unavailable, will play on ${this._playerLabel(standIn)}`
+          : "Currently unavailable — will be skipped";
     }
   }
 
@@ -373,6 +398,12 @@ class IntercomCard extends HTMLElement {
 
     const data = { message };
     if (players.length) data.players = players;
+    const alternates = {};
+    for (const entity of players) {
+      const list = this._alternates(entity);
+      if (list.length) alternates[entity] = list;
+    }
+    if (Object.keys(alternates).length) data.alternates = alternates;
     if (notifyTargets.length) data.notify = notifyTargets;
     if (this._config.show_volume !== false && players.length)
       data.volume = this._volume;
@@ -490,7 +521,22 @@ class IntercomCard extends HTMLElement {
 
     const rows = document.createElement("ul");
     rows.className = "status-rows";
-    for (const p of result.players || []) {
+    const players = result.players || [];
+    for (const p of players) {
+      // An alternate's own row is shown on the speaker it stood in for.
+      if (p.alternate_for) continue;
+      if (p.status === "rerouted") {
+        const alt = players.find((o) => o.entity_id === p.rerouted_to);
+        rows.appendChild(
+          this._row(
+            `${p.name || p.entity_id} → ${(alt && alt.name) || p.rerouted_to}`,
+            alt ? alt.status : p.status,
+            p.detail,
+            true
+          )
+        );
+        continue;
+      }
       rows.appendChild(
         this._row(
           p.name || p.entity_id,
@@ -516,8 +562,8 @@ class IntercomCard extends HTMLElement {
     // but not for a broadcast replayed from before this card loaded.
     const retryable = replay
       ? []
-      : (result.players || [])
-          .filter((p) => !OK_STATUSES.has(p.status))
+      : players
+          .filter((p) => !p.alternate_for && !OK_STATUSES.has(p.status))
           .map((p) => p.entity_id);
     if (retryable.length) {
       const retry = document.createElement("button");

@@ -38,6 +38,7 @@ from .broadcast import (
     new_broadcast_id,
 )
 from .const import (
+    ATTR_ALTERNATES,
     ATTR_CRITICAL,
     ATTR_ENGINE,
     ATTR_MAX_ATTEMPTS,
@@ -88,6 +89,9 @@ BROADCAST_SCHEMA = vol.Schema(
         vol.Optional(ATTR_MAX_ATTEMPTS): vol.All(
             vol.Coerce(int), vol.Range(min=1, max=5)
         ),
+        vol.Optional(ATTR_ALTERNATES, default=dict): {
+            cv.entity_id: vol.All(cv.ensure_list, [cv.entity_id])
+        },
     }
 )
 
@@ -139,6 +143,8 @@ def _build_request(options: dict, call: ServiceCall) -> BroadcastRequest:
             "Nothing to broadcast to: give at least one player or notify target"
         )
 
+    alternates = _alternates(call.data[ATTR_ALTERNATES], players)
+
     critical: bool = call.data[ATTR_CRITICAL]
     attempts = call.data.get(ATTR_MAX_ATTEMPTS)
     if attempts is None:
@@ -160,7 +166,34 @@ def _build_request(options: dict, call: ServiceCall) -> BroadcastRequest:
         max_attempts=max(1, int(attempts)),
         wait_timeout=float(options.get(CONF_WAIT_TIMEOUT, DEFAULT_WAIT_TIMEOUT)),
         start_timeout=float(options.get(CONF_START_TIMEOUT, DEFAULT_START_TIMEOUT)),
+        alternates=alternates,
     )
+
+
+def _alternates(
+    given: dict[str, list[str]], players: list[str]
+) -> dict[str, tuple[str, ...]]:
+    """Return each requested player's alternates, deduplicated, in order.
+
+    A player listed among its own alternates is dropped, and so is a player
+    left with none.
+
+    :param given: the validated ``alternates`` field of the service call.
+    :param players: the requested players.
+    :returns: requested player -> its alternates.
+    :raises HomeAssistantError: an alternates key is not one of ``players``.
+    """
+    unknown = [entity for entity in given if entity not in players]
+    if unknown:
+        raise HomeAssistantError(
+            f"alternates given for {', '.join(unknown)}, which is not in players"
+        )
+    cleaned: dict[str, tuple[str, ...]] = {}
+    for entity, alternates in given.items():
+        ordered = tuple(alt for alt in dict.fromkeys(alternates) if alt != entity)
+        if ordered:
+            cleaned[entity] = ordered
+    return cleaned
 
 
 async def _async_broadcast(
