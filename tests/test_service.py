@@ -281,3 +281,15 @@ def test_a_failed_reroute_is_reported_as_a_problem():
     assert result["failed"] == [STUDY]
     assert result["rerouted"] == []
     assert "Study" in notifications(hass)[0]["message"]
+
+
+def test_the_notification_says_which_speaker_an_alternate_stood_in_for():
+    hass = sonos_offline(with_notify(new_hass()))
+    hass.services.register("tts", "speak", always_fails())
+
+    broadcast(hass, message="hi", players=[SONOS], alternates={SONOS: STUDY})
+
+    assert (
+        "- Study (media_player.study): failed, alternate for Sonos"
+        in (notifications(hass)[0]["message"])
+    )
