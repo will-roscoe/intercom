@@ -30,6 +30,12 @@
  *       chime: false           # optional; overrides the card's `chime`
  *       alternates:            # optional; played on instead, in order, when
  *         - media_player.kitchen #  this speaker is offline or cannot play
+ *   holds:                     # optional; offers "Hold until" choices
+ *     - name: Will is home     #  shown as the choice and as "held until ..."
+ *       conditions:            #  as in an automation's `conditions:`
+ *         - condition: state
+ *           entity_id: person.will
+ *           state: home
  *   notify:                    # optional
  *     - service: notify.mobile_app_phone
  *       name: My Phone
@@ -66,6 +72,8 @@ class IntercomCard extends HTMLElement {
     this._critical = false;
     this._built = false;
     this._unsub = null;
+    this._unsubHeld = null;
+    this._held = [];
     this._subscribed = false;
     this._pending = false;
     this._lastResult = null;
@@ -118,9 +126,11 @@ class IntercomCard extends HTMLElement {
   }
 
   disconnectedCallback() {
-    if (this._unsub) {
-      this._unsub.then((fn) => fn && fn()).catch(() => {});
-      this._unsub = null;
+    for (const key of ["_unsub", "_unsubHeld"]) {
+      if (this[key]) {
+        this[key].then((fn) => fn && fn()).catch(() => {});
+        this[key] = null;
+      }
     }
   }
 
@@ -143,6 +153,47 @@ class IntercomCard extends HTMLElement {
     return Object.keys(this._hass.states)
       .filter((e) => e.startsWith("media_player."))
       .map((entity) => ({ entity }));
+  }
+
+  // The card's "hold until" presets: [{name, conditions}].
+  _holds() {
+    if (!Array.isArray(this._config.holds)) return [];
+    return this._config.holds.filter((h) => h && h.conditions);
+  }
+
+  // The preset chosen in the "hold until" select, or null for "Send now".
+  _chosenHold() {
+    if (!this._holdChoice) return null;
+    return this._holds()[Number(this._holdChoice)] || null;
+  }
+
+  _renderHeld() {
+    if (!this._heldEl) return;
+    this._heldEl.innerHTML = "";
+    for (const item of this._held) {
+      const li = document.createElement("li");
+      li.className = "held-item";
+      const text = document.createElement("span");
+      text.className = "held-text";
+      text.textContent = `“${item.message}” — held until ${item.label}`;
+      if (item.expires_at) text.title = `Expires ${item.expires_at}`;
+      const cancel = document.createElement("button");
+      cancel.className = "cancel";
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => this._cancelHeld(item.id));
+      li.appendChild(text);
+      li.appendChild(cancel);
+      this._heldEl.appendChild(li);
+    }
+  }
+
+  async _cancelHeld(id) {
+    try {
+      await this._hass.callWS({ type: "intercom/cancel_held", held_id: id });
+    } catch (err) {
+      this._setStatus(`Could not cancel: ${(err && err.message) || err}`, "bad");
+    }
   }
 
   // A speaker's configured alternates, in order; [] when it has none. A single
@@ -295,6 +346,36 @@ class IntercomCard extends HTMLElement {
       content.appendChild(this._section("Notify", this._notifyChips));
     }
 
+    // "hold until" choice, when the card offers presets
+    const holds = this._holds();
+    this._holdEl = null;
+    if (holds.length) {
+      const row = document.createElement("div");
+      row.className = "hold-row";
+      const caption = document.createElement("span");
+      caption.textContent = "Hold until";
+      row.appendChild(caption);
+      const sel = document.createElement("select");
+      sel.className = "hold";
+      const now = document.createElement("option");
+      now.value = "";
+      now.textContent = "Send now";
+      sel.appendChild(now);
+      holds.forEach((hold, i) => {
+        const opt = document.createElement("option");
+        opt.value = String(i);
+        opt.textContent = hold.name || `Preset ${i + 1}`;
+        sel.appendChild(opt);
+      });
+      sel.value = this._holdChoice || "";
+      sel.addEventListener("change", (e) => {
+        this._holdChoice = e.target.value;
+      });
+      row.appendChild(sel);
+      this._holdEl = sel;
+      content.appendChild(row);
+    }
+
     // broadcast button, with the critical toggle beside it when enabled
     const btn = document.createElement("button");
     btn.className = "broadcast";
@@ -331,6 +412,12 @@ class IntercomCard extends HTMLElement {
     this._statusEl = document.createElement("div");
     this._statusEl.className = "status";
     content.appendChild(this._statusEl);
+
+    // messages held until their conditions are met, from anyone
+    this._heldEl = document.createElement("ul");
+    this._heldEl.className = "held";
+    content.appendChild(this._heldEl);
+    this._renderHeld();
 
     card.appendChild(content);
     root.appendChild(card);
@@ -437,6 +524,11 @@ class IntercomCard extends HTMLElement {
     if (Object.keys(alternates).length) data.alternates = alternates;
     const chime = this._chimeFor(players);
     if (chime !== undefined) data.chime = chime;
+    const hold = overridePlayers ? null : this._chosenHold();
+    if (hold) {
+      data.hold = hold.conditions;
+      if (hold.name) data.hold_label = hold.name;
+    }
     if (notifyTargets.length) data.notify = notifyTargets;
     if (this._config.show_volume !== false && players.length)
       data.volume = this._volume;
@@ -457,7 +549,13 @@ class IntercomCard extends HTMLElement {
         true
       );
       const result = res && res.response;
-      if (result) {
+      if (result && result.held) {
+        // Not delivered yet: it waits, and shows in the held list below.
+        this._setStatus(`Held until ${result.label}`, "warn");
+        this._clearMessage(false);
+        this._holdChoice = "";
+        if (this._holdEl) this._holdEl.value = "";
+      } else if (result) {
         this._showResult(result, true);
       } else {
         // Older frontends do not return service responses; fall back to the
@@ -519,6 +617,15 @@ class IntercomCard extends HTMLElement {
         this._subscribed = false;
         return null;
       });
+    this._unsubHeld = this._hass.connection
+      .subscribeMessage(
+        (msg) => {
+          this._held = (msg && msg.held) || [];
+          this._renderHeld();
+        },
+        { type: "intercom/subscribe_held" }
+      )
+      .catch(() => null);
   }
 
   _onPushed(msg) {
@@ -674,6 +781,14 @@ const STYLES = `
   button.clear:hover { color: var(--primary-text-color); background: var(--secondary-background-color); }
   button.clear[hidden] { display: none; }
   .send-row { display: flex; align-items: stretch; gap: 8px; margin-top: 4px; }
+  .hold-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.9em; }
+  .hold-row select { flex: 1; padding: 4px; border-radius: 6px; }
+  .hold-row span { color: var(--secondary-text-color, #666); }
+  .held { list-style: none; padding: 0; margin: 8px 0 0; }
+  .held-item { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 6px 0; border-top: 1px solid var(--divider-color, #e0e0e0); font-size: 0.9em; }
+  .held-item .cancel { border: 1px solid var(--divider-color, #ccc); background: none;
+    border-radius: 6px; padding: 2px 10px; cursor: pointer; color: inherit; }
   .send-row button.broadcast { flex: 1; margin-top: 0; }
   button.critical {
     flex: none; padding: 0 16px; border-radius: 12px; cursor: pointer;

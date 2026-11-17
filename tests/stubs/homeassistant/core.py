@@ -136,6 +136,8 @@ class HomeAssistant:
         self.bus = _Bus()
         self.data: dict = {}
         self.state_listeners: dict[str, list] = {}
+        self.interval_listeners: list = []
+        self.tasks: list = []
 
     @property
     def loop(self):
@@ -144,6 +146,22 @@ class HomeAssistant:
             return asyncio.get_running_loop()
         except RuntimeError:
             return None
+
+    def async_create_task(self, coro, name=None, eager_start=True):
+        task = asyncio.ensure_future(coro)
+        self.tasks.append(task)
+        return task
+
+    async def async_block_till_done(self) -> None:
+        """Wait for every task started with async_create_task, including new ones."""
+        while pending := [t for t in self.tasks if not t.done()]:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async def fire_intervals(self) -> None:
+        for action in list(self.interval_listeners):
+            result = action(None)
+            if asyncio.iscoroutine(result):
+                await result
 
     def dispatch_state_change(self, entity_id, old, new) -> None:
         for listener in list(self.state_listeners.get(entity_id, [])):

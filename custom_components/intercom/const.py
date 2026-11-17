@@ -16,6 +16,8 @@ CONF_UNMUTE: Final = "unmute"
 CONF_CHIME: Final = "chime"
 CONF_CHIME_MEDIA: Final = "chime_media"
 CONF_CHIME_SECONDS: Final = "chime_seconds"
+# Hours a held message waits before it is dropped; unset means never.
+CONF_HOLD_EXPIRY: Final = "hold_expiry"
 
 # Defaults
 DEFAULT_TTS_ENGINE: Final = "tts.piper"
@@ -54,6 +56,8 @@ ATTR_VERIFY: Final = "verify"
 ATTR_MAX_ATTEMPTS: Final = "max_attempts"
 ATTR_ALTERNATES: Final = "alternates"
 ATTR_CHIME: Final = "chime"
+ATTR_HOLD: Final = "hold"
+ATTR_HOLD_LABEL: Final = "hold_label"
 
 # Fired on the HA event bus after every broadcast so cards/automations can react.
 # NOTE: only admins may subscribe to custom events over the websocket API, so the
@@ -103,6 +107,8 @@ FEATURE_VOLUME_MUTE: Final = 8
 # Websocket API. Home Assistant only lets admins subscribe to arbitrary bus
 # events, so the card subscribes to this narrow command of ours instead.
 WS_TYPE_SUBSCRIBE_RESULT: Final = f"{DOMAIN}/subscribe_result"
+WS_TYPE_SUBSCRIBE_HELD: Final = f"{DOMAIN}/subscribe_held"
+WS_TYPE_CANCEL_HELD: Final = f"{DOMAIN}/cancel_held"
 
 # Frontend card
 URL_BASE: Final = "/intercom"
@@ -117,3 +123,8 @@ DATA_CARD_REGISTERED: Final = f"{DOMAIN}_card_registered"
 DATA_LAST_RESULT: Final = f"{DOMAIN}_last_result"
 # One asyncio.Lock per speaker: a speaker plays one message at a time.
 DATA_SPEAKER_LOCKS: Final = f"{DOMAIN}_speaker_locks"
+# The HeldMessages instance (held.py).
+DATA_HELD: Final = f"{DOMAIN}_held"
+# Held messages are re-checked this often, for conditions no entity change
+# announces (templates, time).
+HELD_CHECK_SECONDS: Final = 60

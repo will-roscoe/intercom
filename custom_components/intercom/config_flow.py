@@ -18,6 +18,7 @@ from .const import (
     CONF_CHIME_MEDIA,
     CONF_CHIME_SECONDS,
     CONF_DEFAULT_TITLE,
+    CONF_HOLD_EXPIRY,
     CONF_MAX_ATTEMPTS,
     CONF_START_TIMEOUT,
     CONF_TTS_ENGINE,
@@ -87,6 +88,15 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=0, max=10, step=0.1, unit_of_measurement="s", mode="box"
+                )
+            ),
+            # No default: left empty, held messages never expire.
+            vol.Optional(
+                CONF_HOLD_EXPIRY,
+                description={"suggested_value": defaults.get(CONF_HOLD_EXPIRY)},
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.5, max=720, step=0.5, unit_of_measurement="h", mode="box"
                 )
             ),
         }

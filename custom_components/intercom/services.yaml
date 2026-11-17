@@ -118,3 +118,21 @@ broadcast:
       required: false
       selector:
         boolean:
+    hold:
+      name: Hold until
+      description: >-
+        Conditions, as in an automation's `conditions:`, that must all be true
+        before the message is sent. If they already are, it is sent now;
+        otherwise it is held (across restarts) and sent when they become true.
+      required: false
+      example: '[{"condition": "state", "entity_id": "person.will", "state": "home"}]'
+      selector:
+        object:
+    hold_label:
+      name: Hold label
+      description: >-
+        Words for what the message is waiting for, shown as "held until ...".
+      required: false
+      example: Will is home
+      selector:
+        text:
