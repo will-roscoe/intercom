@@ -127,3 +127,11 @@ def test_card_version_comes_from_the_manifest():
     )
     frontend = (COMPONENT / "frontend.py").read_text()
     assert 'f"{CARD_URL}?v={version}"' in frontend
+
+
+def test_the_bundled_chime_ships_and_is_served():
+    constants = (COMPONENT / "const.py").read_text()
+    filename = re.search(r'CHIME_FILENAME: Final = "([^"]+)"', constants).group(1)
+    chime = COMPONENT / "www" / filename
+    assert chime.is_file() and chime.stat().st_size > 1000
+    assert "CHIME_URL" in (COMPONENT / "frontend.py").read_text()

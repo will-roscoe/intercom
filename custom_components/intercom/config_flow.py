@@ -14,12 +14,17 @@ from homeassistant.helpers import selector
 import voluptuous as vol
 
 from .const import (
+    CONF_CHIME,
+    CONF_CHIME_MEDIA,
+    CONF_CHIME_SECONDS,
     CONF_DEFAULT_TITLE,
     CONF_MAX_ATTEMPTS,
     CONF_START_TIMEOUT,
     CONF_TTS_ENGINE,
     CONF_UNMUTE,
     CONF_WAIT_TIMEOUT,
+    DEFAULT_CHIME,
+    DEFAULT_CHIME_SECONDS,
     DEFAULT_MAX_ATTEMPTS,
     DEFAULT_START_TIMEOUT,
     DEFAULT_TITLE,
@@ -68,6 +73,22 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
                 CONF_UNMUTE,
                 default=defaults.get(CONF_UNMUTE, DEFAULT_UNMUTE),
             ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_CHIME,
+                default=defaults.get(CONF_CHIME, DEFAULT_CHIME),
+            ): selector.BooleanSelector(),
+            vol.Optional(
+                CONF_CHIME_MEDIA,
+                default=defaults.get(CONF_CHIME_MEDIA, ""),
+            ): selector.TextSelector(),
+            vol.Optional(
+                CONF_CHIME_SECONDS,
+                default=defaults.get(CONF_CHIME_SECONDS, DEFAULT_CHIME_SECONDS),
+            ): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0, max=10, step=0.1, unit_of_measurement="s", mode="box"
+                )
+            ),
         }
     )
 

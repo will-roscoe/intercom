@@ -10,13 +10,19 @@
           "wait_timeout": "Max seconds to wait for playback",
           "start_timeout": "Max seconds to wait for playback to start",
           "max_attempts": "Attempts per target",
-          "unmute": "Unmute muted speakers for announcements"
+          "unmute": "Unmute muted speakers for announcements",
+          "chime": "Chime before every message",
+          "chime_media": "Chime sound",
+          "chime_seconds": "Pause after the chime"
         },
         "data_description": {
           "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
           "start_timeout": "How long to wait for a speaker to show any sign of playing before reporting that nothing was heard. Sonos needs several seconds to buffer.",
           "max_attempts": "How many times each speaker or notify target is tried before it is reported as failed.",
-          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that."
+          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that.",
+          "chime": "Play a chime on each speaker before speaking. A card or service call can switch it on or off per broadcast or per speaker.",
+          "chime_media": "Media to play as the chime: a URL or media-source ID. Leave empty for the bundled chime.",
+          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime."
         }
       }
     },
@@ -34,13 +40,19 @@
           "wait_timeout": "Max seconds to wait for playback",
           "start_timeout": "Max seconds to wait for playback to start",
           "max_attempts": "Attempts per target",
-          "unmute": "Unmute muted speakers for announcements"
+          "unmute": "Unmute muted speakers for announcements",
+          "chime": "Chime before every message",
+          "chime_media": "Chime sound",
+          "chime_seconds": "Pause after the chime"
         },
         "data_description": {
           "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
           "start_timeout": "How long to wait for a speaker to show any sign of playing before reporting that nothing was heard. Sonos needs several seconds to buffer.",
           "max_attempts": "How many times each speaker or notify target is tried before it is reported as failed.",
-          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that."
+          "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that.",
+          "chime": "Play a chime on each speaker before speaking. A card or service call can switch it on or off per broadcast or per speaker.",
+          "chime_media": "Media to play as the chime: a URL or media-source ID. Leave empty for the bundled chime.",
+          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime."
         }
       }
     }
@@ -93,6 +105,10 @@
         "alternates": {
           "name": "Alternates",
           "description": "Per speaker, the speakers to play on instead, in order, when it is offline or cannot play media."
+        },
+        "chime": {
+          "name": "Chime",
+          "description": "Play a chime before the message: true or false for every speaker, or a list of speakers. Their alternates chime too. Leave out to use the integration setting."
         }
       }
     }

@@ -14,7 +14,13 @@ from pathlib import Path
 
 from homeassistant.core import HomeAssistant
 
-from .const import CARD_FILENAME, DATA_CARD_REGISTERED, URL_BASE
+from .const import (
+    CARD_FILENAME,
+    CHIME_FILENAME,
+    CHIME_URL,
+    DATA_CARD_REGISTERED,
+    URL_BASE,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,13 +37,20 @@ async def async_register_card(hass: HomeAssistant, version: str) -> None:
 
 
 async def _async_serve_static(hass: HomeAssistant) -> None:
-    """Serve the bundled card from the integration package (no /config/www copy)."""
+    """Serve the bundled card and chime from the integration package."""
     from homeassistant.components.http import StaticPathConfig
 
-    card_path = str(Path(__file__).parent / "www" / CARD_FILENAME)
+    www = Path(__file__).parent / "www"
     try:
         await hass.http.async_register_static_paths(
-            [StaticPathConfig(CARD_URL, card_path, cache_headers=False)]
+            [
+                StaticPathConfig(
+                    CARD_URL, str(www / CARD_FILENAME), cache_headers=False
+                ),
+                StaticPathConfig(
+                    CHIME_URL, str(www / CHIME_FILENAME), cache_headers=True
+                ),
+            ]
         )
     except (RuntimeError, ValueError) as err:
         # Already registered (e.g. after a reload) — not fatal.

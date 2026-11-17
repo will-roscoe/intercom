@@ -293,3 +293,52 @@ def test_the_notification_says_which_speaker_an_alternate_stood_in_for():
         "- Study (media_player.study): failed, alternate for Sonos"
         in (notifications(hass)[0]["message"])
     )
+
+
+# --- chime ---------------------------------------------------------------------
+
+
+def test_chime_true_covers_every_speaker_and_their_alternates():
+    request = _build_request(
+        OPTIONS,
+        call(message="hi", players=[SONOS], alternates={SONOS: [STUDY]}, chime=True),
+    )
+    assert request.chime == {SONOS, STUDY}
+    assert request.chime_media == "/intercom/chime.mp3"
+    assert request.chime_seconds == 1.5
+
+
+def test_chime_for_some_speakers_includes_only_their_alternates():
+    request = _build_request(
+        OPTIONS,
+        call(
+            message="hi",
+            players=[SONOS, STUDY],
+            alternates={SONOS: [LOUNGE]},
+            chime=[SONOS],
+        ),
+    )
+    assert request.chime == {SONOS, LOUNGE}
+
+
+def test_chime_for_a_speaker_not_in_players_is_an_error():
+    with pytest.raises(HomeAssistantError, match=LOUNGE):
+        _build_request(OPTIONS, call(message="hi", players=[SONOS], chime=[LOUNGE]))
+
+
+def test_the_integration_default_decides_when_the_call_says_nothing():
+    off = _build_request(OPTIONS, call(message="hi", players=[SONOS]))
+    on = _build_request(
+        {**OPTIONS, "chime": True, "chime_media": "media-source://x/ding.mp3"},
+        call(message="hi", players=[SONOS]),
+    )
+    assert off.chime == frozenset()
+    assert on.chime == {SONOS}
+    assert on.chime_media == "media-source://x/ding.mp3"
+
+
+def test_chime_false_overrides_an_integration_default_of_on():
+    request = _build_request(
+        {**OPTIONS, "chime": True}, call(message="hi", players=[SONOS], chime=False)
+    )
+    assert request.chime == frozenset()
