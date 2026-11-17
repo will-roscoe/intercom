@@ -31,7 +31,9 @@ def boolean(value):
         if lowered in ("0", "false", "no", "off", "disable"):
             return False
         raise vol.Invalid(f"invalid boolean value {value}")
-    return bool(value)
+    if isinstance(value, (int, float)):
+        return value != 0
+    raise vol.Invalid(f"invalid boolean value {value}")
 
 
 def ensure_list(value):

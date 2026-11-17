@@ -73,6 +73,11 @@ class BroadcastRequest:
     # Requested player -> the players to try instead, in order, when it is
     # offline or cannot play media. Never contains the player itself.
     alternates: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Players that get a chime before the message, the media to play for it,
+    # and how long to wait after starting it before speaking.
+    chime: frozenset[str] = frozenset()
+    chime_media: str = ""
+    chime_seconds: float = 0.0
 
 
 @dataclass
@@ -201,6 +206,54 @@ async def _async_prepare_player(
     return prep
 
 
+def _playable_url(hass: HomeAssistant, media: str) -> str:
+    """Return ``media`` as a URL a speaker can fetch.
+
+    A path on Home Assistant (the bundled ``/intercom/chime.mp3``) becomes an
+    absolute, signed URL; anything else is returned unchanged.
+    """
+    try:
+        from homeassistant.components.media_player.browse_media import (
+            async_process_play_media_url,
+        )
+    except ImportError:  # pragma: no cover - only the test stubs lack it
+        return media
+    try:
+        return async_process_play_media_url(hass, media)
+    except Exception:  # noqa: BLE001 - e.g. no URL configured; let the player try
+        return media
+
+
+async def _async_chime(
+    hass: HomeAssistant,
+    request: BroadcastRequest,
+    entity_id: str,
+    outcome: dict[str, Any],
+) -> None:
+    """Play the chime on a player as an announcement, then pause.
+
+    A failure is recorded in ``outcome["warnings"]`` and never stops the
+    message that follows.
+    """
+    try:
+        async with asyncio.timeout(request.wait_timeout):
+            await hass.services.async_call(
+                "media_player",
+                "play_media",
+                {
+                    "entity_id": entity_id,
+                    "media_content_id": _playable_url(hass, request.chime_media),
+                    "media_content_type": "music",
+                    "announce": True,
+                },
+                blocking=True,
+            )
+    except Exception as err:  # noqa: BLE001 - the message matters more
+        outcome["warnings"].append(f"chime failed: {_error_text(err)}")
+        return
+    await asyncio.sleep(request.chime_seconds)
+
+
 async def _async_restore_player(
     hass: HomeAssistant,
     entity_id: str,
@@ -257,6 +310,7 @@ async def _async_speak_on_player(
     instead of being waited for and retried.
     """
     outcome = _new_player_outcome(hass, entity_id)
+    chimed = False  # the chime plays once per broadcast, not once per attempt
 
     for attempt in range(1, request.max_attempts + 1):
         outcome["attempts"] = attempt
@@ -288,6 +342,11 @@ async def _async_speak_on_player(
             else PlaybackVerifier(hass, entity_id)
         )
         try:
+            if entity_id in request.chime and not chimed:
+                # Before arming, so the chime is finished (and, on Sonos, already
+                # in the speaker's clip list) when the check starts watching.
+                chimed = True
+                await _async_chime(hass, request, entity_id, outcome)
             # Armed before speaking so even the shortest clip is observed.
             await verifier.async_arm()
             try:

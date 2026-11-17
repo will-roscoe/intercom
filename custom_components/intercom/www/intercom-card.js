@@ -19,12 +19,15 @@
  *   default_volume: 40         # optional, 0-100; set `show_volume: false` to hide slider
  *   show_volume: true          # optional
  *   show_critical: false       # optional; show a Critical toggle by the button
+ *   chime: true                # optional; chime before the message (else the
+ *                              # integration setting); a speaker's own `chime` wins
  *   critical: false            # optional; retry harder and fail loudly. With
  *                              # show_critical it is where the toggle starts,
  *                              # otherwise it applies to every broadcast
  *   players:                   # optional; auto-discovers media_player.* if omitted
  *     - entity: media_player.sonosroam
  *       name: Sonos Roam
+ *       chime: false           # optional; overrides the card's `chime`
  *       alternates:            # optional; played on instead, in order, when
  *         - media_player.kitchen #  this speaker is offline or cannot play
  *   notify:                    # optional
@@ -149,6 +152,26 @@ class IntercomCard extends HTMLElement {
     const alts = item && item.alternates;
     if (typeof alts === "string") return [alts];
     return Array.isArray(alts) ? alts : [];
+  }
+
+  // The service's `chime` for these speakers: undefined when neither the card
+  // nor any speaker sets it (the integration setting decides), true or false
+  // when every speaker agrees, otherwise the list of speakers that chime. A
+  // speaker's own `chime` overrides the card's.
+  _chimeFor(players) {
+    const own = (entity) => {
+      const item = this._players().find((p) => p.entity === entity);
+      return item ? item.chime : undefined;
+    };
+    if (
+      this._config.chime === undefined &&
+      players.every((p) => own(p) === undefined)
+    )
+      return undefined;
+    const on = players.filter((p) => (own(p) ?? this._config.chime) === true);
+    if (on.length === players.length) return true;
+    if (!on.length) return false;
+    return on;
   }
 
   // A speaker's label, using its card config name when it has one.
@@ -412,6 +435,8 @@ class IntercomCard extends HTMLElement {
       if (list.length) alternates[entity] = list;
     }
     if (Object.keys(alternates).length) data.alternates = alternates;
+    const chime = this._chimeFor(players);
+    if (chime !== undefined) data.chime = chime;
     if (notifyTargets.length) data.notify = notifyTargets;
     if (this._config.show_volume !== false && players.length)
       data.volume = this._volume;
