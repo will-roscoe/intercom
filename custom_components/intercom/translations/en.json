@@ -13,7 +13,8 @@
           "unmute": "Unmute muted speakers for announcements",
           "chime": "Chime before every message",
           "chime_media": "Chime sound",
-          "chime_seconds": "Pause after the chime"
+          "chime_seconds": "Pause after the chime",
+          "hold_expiry": "Held messages expire after"
         },
         "data_description": {
           "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
@@ -22,7 +23,8 @@
           "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that.",
           "chime": "Play a chime on each speaker before speaking. A card or service call can switch it on or off per broadcast or per speaker.",
           "chime_media": "Media to play as the chime: a URL or media-source ID. Leave empty for the bundled chime.",
-          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime."
+          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime.",
+          "hold_expiry": "Drop a held message that has waited this long, and say so in a notification. Leave empty to keep held messages until they are sent or cancelled."
         }
       }
     },
@@ -43,7 +45,8 @@
           "unmute": "Unmute muted speakers for announcements",
           "chime": "Chime before every message",
           "chime_media": "Chime sound",
-          "chime_seconds": "Pause after the chime"
+          "chime_seconds": "Pause after the chime",
+          "hold_expiry": "Held messages expire after"
         },
         "data_description": {
           "wait_timeout": "How long a single announcement is allowed to take before it is given up on.",
@@ -52,7 +55,8 @@
           "unmute": "A muted speaker accepts an announcement and plays it silently. Unmuting first (and re-muting afterwards) prevents that.",
           "chime": "Play a chime on each speaker before speaking. A card or service call can switch it on or off per broadcast or per speaker.",
           "chime_media": "Media to play as the chime: a URL or media-source ID. Leave empty for the bundled chime.",
-          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime."
+          "chime_seconds": "How long to wait after starting the chime before speaking. Set it a little longer than your chime.",
+          "hold_expiry": "Drop a held message that has waited this long, and say so in a notification. Leave empty to keep held messages until they are sent or cancelled."
         }
       }
     }
@@ -109,6 +113,14 @@
         "chime": {
           "name": "Chime",
           "description": "Play a chime before the message: true or false for every speaker, or a list of speakers. Their alternates chime too. Leave out to use the integration setting."
+        },
+        "hold": {
+          "name": "Hold until",
+          "description": "Conditions, as in an automation, that must all be true before the message is sent. Held across restarts until they are."
+        },
+        "hold_label": {
+          "name": "Hold label",
+          "description": "Words for what the message is waiting for, shown as \"held until ...\"."
         }
       }
     }

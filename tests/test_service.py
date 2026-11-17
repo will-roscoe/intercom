@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 from helpers import SONOS, STUDY, always_fails, new_hass, speaks_on
-from homeassistant.core import ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from intercom import BROADCAST_SCHEMA, _async_broadcast, _build_request
 import pytest
@@ -15,7 +14,7 @@ OPTIONS = {"wait_timeout": 5, "start_timeout": 0.6, "max_attempts": 1}
 
 
 def call(**data):
-    return ServiceCall(BROADCAST_SCHEMA(data))
+    return dict(BROADCAST_SCHEMA(data))
 
 
 def broadcast(hass, **data):
@@ -342,3 +341,59 @@ def test_chime_false_overrides_an_integration_default_of_on():
         {**OPTIONS, "chime": True}, call(message="hi", players=[SONOS], chime=False)
     )
     assert request.chime == frozenset()
+
+
+# --- held messages -------------------------------------------------------------
+
+PERSON = "person.will"
+HOLD = [{"condition": "state", "entity_id": PERSON, "state": "home"}]
+
+
+def held_service(hass, **data):
+    async def scenario():
+        from homeassistant.helpers.storage import Store
+        from intercom import DATA_HELD, _async_service
+        from intercom.held import HeldMessages
+
+        Store.DISK.clear()
+        held = HeldMessages(
+            hass, lambda: OPTIONS, lambda d: _async_broadcast(hass, OPTIONS, d)
+        )
+        await held.async_load()
+        hass.data[DATA_HELD] = held
+        result = await _async_service(hass, OPTIONS, call(**data))
+        return result, Store.DISK.get("intercom.held")
+
+    return asyncio.run(scenario())
+
+
+def test_a_held_call_is_kept_without_speaking():
+    hass = new_hass()
+    hass.states.set(PERSON, "not_home")
+    hass.services.register("tts", "speak", speaks_on(SONOS))
+
+    result, saved = held_service(
+        hass, message="hi", players=[SONOS], hold=HOLD, hold_label="Will is home"
+    )
+
+    assert result["held"] is True and result["summary"] == "held until Will is home"
+    assert not [c for c in hass.services.calls if c[:2] == ("tts", "speak")]
+    assert "hold" not in saved["items"][0]["data"]
+    assert "hold_label" not in saved["items"][0]["data"]
+
+
+def test_a_held_call_that_could_never_play_is_rejected_at_once():
+    hass = new_hass()
+    hass.states.set(PERSON, "not_home")
+    with pytest.raises(HomeAssistantError, match="Nothing to broadcast"):
+        held_service(hass, message="hi", hold=HOLD)
+
+
+def test_a_call_whose_hold_is_already_met_broadcasts_now():
+    hass = new_hass()
+    hass.states.set(PERSON, "home")
+    hass.services.register("tts", "speak", speaks_on(SONOS))
+
+    result, _ = held_service(hass, message="hi", players=[SONOS], hold=HOLD)
+
+    assert result["played"] == [SONOS]
