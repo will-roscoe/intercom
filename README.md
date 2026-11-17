@@ -24,6 +24,9 @@ helpers unless you want to.
 - **Bundled Lovelace card** (`custom:intercom-card`) — message box, speaker
   checkboxes, volume slider, notify checkboxes, Broadcast button. Auto-registered;
   no HACS frontend resource to add.
+- **One message at a time per speaker** — two broadcasts to the same speaker
+  (say, from two people at once) take turns in the order they arrived instead
+  of talking over each other. Different speakers still play at the same time.
 - **Confirmed playback, not assumed playback** — a speaker is only reported as
   `played` when Home Assistant actually saw it start playing. "It said it worked
   but nothing came out" becomes an explicit `unverified` result instead of a
@@ -78,6 +81,10 @@ can be overridden per service call:
 | Max seconds to wait for playback to start | `8` | How long a speaker gets to show *any* sign of playing before the result is reported as `unverified`. Sonos needs several seconds to buffer. |
 | Attempts per target | `2` | How many times each speaker or notify target is tried before it is reported as failed. |
 | Unmute muted speakers | on | A muted speaker accepts an announcement and plays it silently; unmuting first (and re-muting after) prevents that. Switching it off does not hide the problem — such a speaker is reported `silent`. A `critical` broadcast unmutes regardless. |
+| Chime before every message | off | Play a chime on each speaker before the message. Cards and service calls can switch it per broadcast or per speaker. |
+| Chime sound | bundled chime | A URL or media-source ID to play instead of the bundled two-note chime. |
+| Pause after the chime | 1.5 s | How long to wait after starting the chime before speaking; set it a little longer than your chime. |
+| Held messages expire after | never | Hours a held message may wait. An expired one is dropped and reported in a notification. |
 
 ---
 
@@ -92,6 +99,8 @@ default_volume: 40
 players:
   - entity: media_player.sonosroam
     name: Sonos Roam
+    alternates:          # optional: played on instead when the Roam is off
+      - media_player.kitchen
 notify:
   - service: notify.mobile_app_phone
     name: My Phone
@@ -102,13 +111,15 @@ notify:
 | Card option | Default | Meaning |
 | --- | --- | --- |
 | `title` | – | Card header. |
-| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`. |
+| `players` | auto (all `media_player.*`) | Speakers to offer. `entity` + optional `name`, and optional `alternates`: speakers to play on instead, in order, when this one is offline or cannot play media. An offline speaker's chip names the alternate it will use, and the result shows it as e.g. "Sonos Roam → Kitchen". |
 | `notify` | – | Notify targets to offer. `service` + optional `name`. |
 | `default_volume` | `40` | Initial slider value (0–100). |
 | `show_volume` | `true` | Hide the slider with `false`. |
 | `volume_step` | `5` | Slider step. |
 | `show_critical` | `false` | Show a **Critical** toggle beside the Broadcast button. |
 | `critical` | `false` | With `show_critical`, where that toggle starts. Without it, every broadcast from this card is critical. |
+| `chime` | integration setting | `true`/`false`: chime before the message on every speaker from this card. A speaker entry's own `chime` overrides it. Leave both out to use the integration setting. |
+| `holds` | – | "Hold until" choices: a list of `name` + `conditions` (as in an automation). Picking one holds the message until the conditions are met. Held messages, from anyone, are listed under the result with a **Cancel** button. |
 
 Offline speakers are shown greyed out with an "offline" tag and are skipped on
 broadcast. After each broadcast the card lists every target and what happened to
@@ -147,6 +158,9 @@ data:
   verify: true         # optional, default true
   critical: false      # optional, default false
   max_attempts: 3      # optional, overrides the configured default
+  alternates:          # optional, per speaker, tried in order
+    media_player.sonosroam:
+      - media_player.kitchen
 ```
 
 | Field | Required | Description |
@@ -161,6 +175,10 @@ data:
 | `verify` | no | Confirm playback before reporting a speaker as played (default `true`). |
 | `critical` | no | Retry silent speakers and raise an error unless everything was delivered (default `false`). |
 | `max_attempts` | no | Attempts per target, 1–5. Overrides the configured default. |
+| `alternates` | no | Per speaker in `players`, the speakers to play on instead, in order, when it is offline or cannot play media. The speaker gets its normal retries first; an alternate that is offline is passed over at once. No speaker plays a message twice. A key that is not in `players` is an error. |
+| `chime` | no | Play a chime before the message: `true`/`false` for every speaker, or a list of speakers. A chosen speaker's alternates chime too. Left out, the integration setting decides. A listed speaker that is not in `players` is an error. A chime that fails is a warning on that speaker, never a reason to skip the message. |
+| `hold` | no | Conditions, as in an automation's `conditions:`, that must all be true before the message goes. Already true: sent now. Otherwise held, across restarts, and sent when they become true. See [Holding a message](#holding-a-message). |
+| `hold_label` | no | What the message waits for, shown as "held until …". |
 
 Calling with no players *and* no notify targets is an error — this service never
 succeeds at doing nothing.
@@ -213,9 +231,18 @@ event) that says what happened to each target individually:
 | `offline` | The entity is missing or `unavailable`; nothing was attempted. |
 | `unsupported` | The entity exists but cannot play media at all. |
 | `sent` | Only with `verify: false` — dispatched, delivery not confirmed. |
+| `rerouted` | The speaker was `offline` or `unsupported`, and one of its [`alternates`](#the-service) delivered the message instead. `rerouted_to` names which; `detail` lists every alternate tried. |
 
 `delivered` is true when at least one target definitely got the message.
-`complete` is true only when *every* requested target did.
+`complete` is true only when *every* requested target did; a `rerouted` speaker
+counts, and the summary names it, e.g. `played on 1/1 speakers (Kitchen via Lounge)`.
+
+An alternate that was not itself requested gets its own entry in `players`, with
+`alternate_for` naming the speaker it stood in for, and appears in the flat
+lists (`played`, `failed`, ...) under its own entity id. `rerouted` lists the
+requested speakers an alternate covered. Alternates skipped because they were
+offline get no entry; they are named in the speaker's `detail`, or in its
+`error` when no alternate could play.
 
 ### Non-admin users
 
@@ -352,6 +379,37 @@ script that maps toggles to entity lists and calls `intercom.broadcast`, and a
 
 ---
 
+## Holding a message
+
+Give a broadcast `hold` conditions and it waits until they are all true:
+
+```yaml
+action: intercom.broadcast
+data:
+  message: "Your parcel came"
+  players: [media_player.kitchen]
+  hold:
+    - condition: state
+      entity_id: person.will
+      state: home
+  hold_label: Will is home
+```
+
+- Conditions use the format of an automation's `conditions:` (state, numeric
+  state, template, time, `and`/`or`/`not`, ...). If they are already true, the
+  message goes now.
+- A held message survives a restart. It is re-checked whenever an entity its
+  conditions name changes, and every minute for templates and time.
+- The call returns at once with `held: true`, an `id`, and a `summary` such as
+  `held until Will is home`. The broadcast result arrives when it is sent, as
+  for any other broadcast.
+- Messages released together go in the order they were held, and each speaker
+  plays one message at a time.
+- The card lists held messages with a **Cancel** button, and its `holds`
+  option offers your conditions as "Hold until" choices.
+- With **Held messages expire after** set, a message that waits longer is
+  dropped and reported in a notification instead of being sent late.
+
 ## Limitations
 
 - **Confirmation is reported, not acoustic.** `played` means the player (or,
@@ -388,6 +446,14 @@ When `cache` is off, Home Assistant hands the speaker a synthesis-on-demand stre
 URL with no `Content-Length`. Sonos accepts the play command (so it looks like it
 worked) but silently plays nothing. With `cache: true`, Piper renders the whole
 clip to a stable cached file the speaker will play. This integration always sets it.
+
+It also has the engine make the message before any speaker is asked to play it,
+so every speaker, retry and alternate fetches the finished file. Made on demand,
+a slow engine (Piper can take 10 to 20 seconds per sentence on a small host)
+keeps the speaker waiting mid-announcement: Music Assistant stutters, the chime is
+followed by a long silence, and the speech can start after the playback check has
+given up. The first sound therefore comes once the speech is ready; phone
+notifications are not held up by it.
 
 ---
 

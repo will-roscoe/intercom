@@ -21,7 +21,14 @@ from homeassistant.components import websocket_api
 from homeassistant.core import Event, HomeAssistant, callback
 import voluptuous as vol
 
-from .const import DATA_LAST_RESULT, EVENT_RESULT, WS_TYPE_SUBSCRIBE_RESULT
+from .const import (
+    DATA_HELD,
+    DATA_LAST_RESULT,
+    EVENT_RESULT,
+    WS_TYPE_CANCEL_HELD,
+    WS_TYPE_SUBSCRIBE_HELD,
+    WS_TYPE_SUBSCRIBE_RESULT,
+)
 
 
 @callback
@@ -31,6 +38,8 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     Idempotent: registering simply replaces the handler, so a reload is safe.
     """
     websocket_api.async_register_command(hass, ws_subscribe_result)
+    websocket_api.async_register_command(hass, ws_subscribe_held)
+    websocket_api.async_register_command(hass, ws_cancel_held)
 
 
 @callback
@@ -70,3 +79,44 @@ def ws_subscribe_result(
         connection.send_message(
             websocket_api.event_message(msg_id, {"result": last, "replay": True})
         )
+
+
+@callback
+@websocket_api.websocket_command({vol.Required("type"): WS_TYPE_SUBSCRIBE_HELD})
+def ws_subscribe_held(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Stream the held messages to any signed-in user: now, then on every change.
+
+    Each event is ``{"held": [...]}`` with the items of
+    :meth:`~.held.HeldMessages.items`, oldest first.
+    """
+    msg_id = msg["id"]
+    held = hass.data.get(DATA_HELD)
+
+    @callback
+    def _forward(items: list[dict[str, Any]]) -> None:
+        connection.send_message(websocket_api.event_message(msg_id, {"held": items}))
+
+    connection.subscriptions[msg_id] = (
+        held.async_subscribe(_forward) if held is not None else (lambda: None)
+    )
+    connection.send_result(msg_id)
+    _forward(held.items() if held is not None else [])
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): WS_TYPE_CANCEL_HELD, vol.Required("held_id"): str}
+)
+@websocket_api.async_response
+async def ws_cancel_held(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Cancel a held message for any signed-in user; replies ``{"cancelled": bool}``."""
+    held = hass.data.get(DATA_HELD)
+    cancelled = held is not None and await held.async_cancel(msg["held_id"])
+    connection.send_result(msg["id"], {"cancelled": cancelled})

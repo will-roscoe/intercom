@@ -18,6 +18,7 @@ Three things make that possible:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 import logging
 from typing import Any
@@ -28,13 +29,16 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CRITICAL_MIN_VOLUME,
+    DATA_SPEAKER_LOCKS,
     DELIVERED_STATUSES,
+    FALLBACK_STATUSES,
     FEATURE_PLAY_MEDIA,
     FEATURE_VOLUME_MUTE,
     FEATURE_VOLUME_SET,
     STATUS_FAILED,
     STATUS_OFFLINE,
     STATUS_PLAYED,
+    STATUS_REROUTED,
     STATUS_SENT,
     STATUS_SILENT,
     STATUS_UNSUPPORTED,
@@ -67,6 +71,14 @@ class BroadcastRequest:
     max_attempts: int
     wait_timeout: float
     start_timeout: float
+    # Requested player -> the players to try instead, in order, when it is
+    # offline or cannot play media. Never contains the player itself.
+    alternates: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Players that get a chime before the message, the media to play for it,
+    # and how long to wait after starting it before speaking.
+    chime: frozenset[str] = frozenset()
+    chime_media: str = ""
+    chime_seconds: float = 0.0
 
 
 @dataclass
@@ -107,6 +119,10 @@ def _new_player_outcome(hass: HomeAssistant, entity_id: str) -> dict[str, Any]:
         "error": None,
         "detail": None,
         "warnings": [],
+        # The alternate that delivered for this speaker (status ``rerouted``).
+        "rerouted_to": None,
+        # Set on an alternate's own outcome: the speaker it stood in for.
+        "alternate_for": None,
     }
 
 
@@ -191,6 +207,82 @@ async def _async_prepare_player(
     return prep
 
 
+def _playable_url(hass: HomeAssistant, media: str) -> str:
+    """Return ``media`` as a URL a speaker can fetch.
+
+    A path on Home Assistant (the bundled ``/intercom/chime.mp3``) becomes an
+    absolute, signed URL; anything else is returned unchanged.
+    """
+    try:
+        from homeassistant.components.media_player.browse_media import (
+            async_process_play_media_url,
+        )
+    except ImportError:  # pragma: no cover - only the test stubs lack it
+        return media
+    try:
+        return async_process_play_media_url(hass, media)
+    except Exception:  # noqa: BLE001 - e.g. no URL configured; let the player try
+        return media
+
+
+async def _async_prepare_speech(hass: HomeAssistant, request: BroadcastRequest) -> None:
+    """Have the TTS engine make the message now, before any speaker is asked.
+
+    The audio lands in Home Assistant's TTS cache, the same one ``tts.speak``
+    with ``cache: true`` reads, so every speaker (and every retry or alternate)
+    is served the finished file at once. Giving up after ``request.wait_timeout``
+    or on any error is logged and otherwise ignored: the speakers then wait for
+    the engine themselves.
+    """
+    try:
+        from homeassistant.components import tts
+    except ImportError:  # pragma: no cover - Home Assistant always has tts
+        return
+    try:
+        async with asyncio.timeout(request.wait_timeout):
+            media_id = tts.generate_media_source_id(
+                hass, request.message, engine=request.engine, cache=True
+            )
+            await tts.async_get_media_source_audio(hass, media_id)
+    except Exception as err:  # noqa: BLE001 - the speakers can still make it
+        _LOGGER.warning(
+            "intercom: could not prepare the speech in advance (%s); "
+            "speakers will wait for %s",
+            _error_text(err),
+            request.engine,
+        )
+
+
+async def _async_chime(
+    hass: HomeAssistant,
+    request: BroadcastRequest,
+    entity_id: str,
+    outcome: dict[str, Any],
+) -> None:
+    """Play the chime on a player as an announcement, then pause.
+
+    A failure is recorded in ``outcome["warnings"]`` and never stops the
+    message that follows.
+    """
+    try:
+        async with asyncio.timeout(request.wait_timeout):
+            await hass.services.async_call(
+                "media_player",
+                "play_media",
+                {
+                    "entity_id": entity_id,
+                    "media_content_id": _playable_url(hass, request.chime_media),
+                    "media_content_type": "music",
+                    "announce": True,
+                },
+                blocking=True,
+            )
+    except Exception as err:  # noqa: BLE001 - the message matters more
+        outcome["warnings"].append(f"chime failed: {_error_text(err)}")
+        return
+    await asyncio.sleep(request.chime_seconds)
+
+
 async def _async_restore_player(
     hass: HomeAssistant,
     entity_id: str,
@@ -235,10 +327,19 @@ def _is_retryable(status: str, request: BroadcastRequest) -> bool:
 
 
 async def _async_speak_on_player(
-    hass: HomeAssistant, request: BroadcastRequest, entity_id: str
+    hass: HomeAssistant,
+    request: BroadcastRequest,
+    entity_id: str,
+    *,
+    wait_when_offline: bool = True,
 ) -> dict[str, Any]:
-    """Speak the message on a single player and report what actually happened."""
+    """Speak the message on a single player and report what actually happened.
+
+    With ``wait_when_offline`` false, an offline player is reported at once
+    instead of being waited for and retried.
+    """
     outcome = _new_player_outcome(hass, entity_id)
+    chimed = False  # the chime plays once per broadcast, not once per attempt
 
     for attempt in range(1, request.max_attempts + 1):
         outcome["attempts"] = attempt
@@ -249,7 +350,7 @@ async def _async_speak_on_player(
             outcome["error"] = (
                 "entity does not exist" if state is None else f"state is {state.state}"
             )
-            if await _async_wait_before_retry(request, attempt):
+            if wait_when_offline and await _async_wait_before_retry(request, attempt):
                 continue
             return outcome
 
@@ -270,6 +371,11 @@ async def _async_speak_on_player(
             else PlaybackVerifier(hass, entity_id)
         )
         try:
+            if entity_id in request.chime and not chimed:
+                # Before arming, so the chime is finished (and, on Sonos, already
+                # in the speaker's clip list) when the check starts watching.
+                chimed = True
+                await _async_chime(hass, request, entity_id, outcome)
             # Armed before speaking so even the shortest clip is observed.
             await verifier.async_arm()
             try:
@@ -459,10 +565,53 @@ async def _async_gather_outcomes(
     return outcomes
 
 
+async def _async_speak_isolated(
+    hass: HomeAssistant,
+    request: BroadcastRequest,
+    entity_id: str,
+    wait_when_offline: bool,
+) -> dict[str, Any]:
+    """Speak on one player; an unexpected crash becomes a ``failed`` outcome.
+
+    A player plays one message at a time: a second broadcast to the same
+    player waits for the first to finish, in the order they arrived.
+    """
+    locks: dict[str, asyncio.Lock] = hass.data.setdefault(DATA_SPEAKER_LOCKS, {})
+    try:
+        async with locks.setdefault(entity_id, asyncio.Lock()):
+            return await _async_speak_on_player(
+                hass, request, entity_id, wait_when_offline=wait_when_offline
+            )
+    except Exception as err:  # noqa: BLE001 - one speaker must not sink the rest
+        _LOGGER.exception("intercom: unexpected error broadcasting to %s", entity_id)
+        outcome = _new_player_outcome(hass, entity_id)
+        outcome["status"] = STATUS_FAILED
+        outcome["error"] = _error_text(err)
+        return outcome
+
+
 async def async_run_players(
     hass: HomeAssistant, request: BroadcastRequest, engine_ok: bool
 ) -> list[dict[str, Any]]:
-    """Speak on every requested player concurrently."""
+    """Speak on every requested player concurrently, falling back to alternates.
+
+    A player that ends ``offline`` or ``unsupported`` and has alternates in
+    ``request.alternates`` tries them in order: an offline or unsupported
+    alternate moves on to the next, anything else ends the chain. A player that
+    an alternate delivered for becomes ``rerouted`` with ``rerouted_to`` set. No
+    player is spoken to twice: an alternate already speaking (requested
+    directly, or used by another player) is waited for, not called again.
+
+    :param hass: Home Assistant.
+    :param request: the broadcast; ``players`` and ``alternates`` are read.
+    :param engine_ok: whether the TTS engine is available; if not, every
+        requested player is ``failed`` and no alternate is tried.
+    :returns: one outcome per requested player, in request order, then one per
+        alternate that was not requested and ended a chain by playing or trying
+        (its ``alternate_for`` names the player it stood in for). An alternate
+        skipped as offline is named in that player's ``detail`` or ``error``
+        instead of getting a row.
+    """
     if not request.players:
         return []
 
@@ -475,10 +624,99 @@ async def async_run_players(
             outcomes.append(outcome)
         return outcomes
 
+    # A speaker that waits for the engine mid-announcement stutters (Music
+    # Assistant), leaves a long silence after the chime, or starts after the
+    # playback check has given up.
+    await _async_prepare_speech(hass, request)
+
+    # One speak task per player, shared by everything that needs its result,
+    # and created by whichever step first needs it, so cancelling the
+    # broadcast reaches it through the step awaiting it. Speak tasks never wait
+    # on each other, so two players listed as each other's alternate cannot
+    # deadlock. Readers copy an outcome before changing it, so a chain always
+    # sees what a player itself did.
+    started: dict[str, asyncio.Future[dict[str, Any]]] = {}
+    # Rows for alternates that were not requested, in the order chains reached
+    # them; None until the chain that started one knows whether it gets a row.
+    extra: dict[str, dict[str, Any] | None] = {}
+
+    def speak(entity_id: str) -> tuple[asyncio.Future, bool]:
+        """Return the player's speak task, and whether the caller owns its row.
+
+        A requested player waits out its offline retries before any alternate
+        is tried; an alternate that is offline is passed over at once. The
+        caller owns the row of an unrequested player whose task it started.
+        """
+        if entity_id in started:
+            return started[entity_id], False
+        requested = entity_id in request.players
+        started[entity_id] = asyncio.ensure_future(
+            _async_speak_isolated(hass, request, entity_id, requested)
+        )
+        return started[entity_id], not requested
+
+    async def run_one(entity_id: str) -> dict[str, Any]:
+        task, _ = speak(entity_id)
+        outcome = dict(await task)
+        if outcome["status"] in FALLBACK_STATUSES:
+            await _async_follow_alternates(
+                hass, request.alternates.get(entity_id, ()), outcome, speak, extra
+            )
+        return outcome
+
     templates = [_new_player_outcome(hass, p) for p in request.players]
-    return await _async_gather_outcomes(
-        [_async_speak_on_player(hass, request, p) for p in request.players], templates
-    )
+    try:
+        outcomes = await _async_gather_outcomes(
+            [run_one(p) for p in request.players], templates
+        )
+    finally:
+        # The speak tasks are not children of the gather, so cancelling the
+        # broadcast (an automation restarted mid-call) must stop them here.
+        for task in started.values():
+            task.cancel()
+    return outcomes + [row for row in extra.values() if row is not None]
+
+
+async def _async_follow_alternates(
+    hass: HomeAssistant,
+    alternates: tuple[str, ...],
+    outcome: dict[str, Any],
+    speak: Callable[[str], tuple[asyncio.Future, bool]],
+    extra: dict[str, dict[str, Any] | None],
+) -> None:
+    """Try ``outcome``'s alternates in order, recording the result on it.
+
+    :param hass: Home Assistant.
+    :param alternates: the player's alternates, in order; may be empty.
+    :param outcome: the player's own outcome (a copy); its ``status``,
+        ``rerouted_to``, ``error`` and ``detail`` are updated in place.
+    :param speak: ``speak(entity_id)`` from :func:`async_run_players`: the
+        player's shared speak task, and whether this chain owns its row.
+    :param extra: rows for unrequested alternates; one this chain starts and
+        ends on gets its row here.
+    """
+    tried: list[str] = []
+    for alt in alternates:
+        task, is_new = speak(alt)
+        if is_new:
+            extra[alt] = None
+        alt_outcome = await task
+        label = alt if hass.states.get(alt) is None else alt_outcome["name"]
+        tried.append(f"{label} {alt_outcome['status']}")
+        if alt_outcome["status"] in FALLBACK_STATUSES:
+            continue
+        if is_new:
+            extra[alt] = {**alt_outcome, "alternate_for": outcome["entity_id"]}
+        if alt_outcome["status"] in DELIVERED_STATUSES:
+            own = outcome["error"]
+            outcome["status"] = STATUS_REROUTED
+            outcome["rerouted_to"] = alt
+            outcome["error"] = None
+            outcome["detail"] = "; ".join(filter(None, [own, *tried]))
+            return
+        break
+    if tried:
+        outcome["error"] = f"{outcome['error']}; alternates: {', '.join(tried)}"
 
 
 async def async_run_notify(
@@ -517,6 +755,7 @@ def build_result(
     offline = by_status.get(STATUS_OFFLINE, [])
     unsupported = by_status.get(STATUS_UNSUPPORTED, [])
     silent = by_status.get(STATUS_SILENT, [])
+    rerouted = by_status.get(STATUS_REROUTED, [])
 
     notified = [o["target"] for o in notify_outcomes if o["status"] == STATUS_SENT]
     notify_failed = [o["target"] for o in notify_outcomes if o["status"] != STATUS_SENT]
@@ -562,6 +801,8 @@ def build_result(
         "offline": offline,
         "unsupported": unsupported,
         "silent": silent,
+        # Requested speakers an alternate delivered for (see "rerouted_to").
+        "rerouted": rerouted,
         "notified": notified,
         "notify_failed": notify_failed,
         "errors": errors,
@@ -578,12 +819,26 @@ def _summarise(
     notify_outcomes: list[dict[str, Any]],
     errors: list[str],
 ) -> str:
-    """One sentence describing the broadcast, suitable for a card or a log."""
-    good = sum(1 for o in player_outcomes if o["status"] in DELIVERED_STATUSES)
+    """One sentence describing the broadcast, suitable for a card or a log.
+
+    Speakers are counted as requested: a rerouted speaker counts as played and
+    is named with its alternate, e.g. ``played on 1/1 speakers (Sonos via
+    Study)``; an alternate's own row is not counted again.
+    """
+    names = {o["entity_id"]: o["name"] for o in player_outcomes}
+    requested = [o for o in player_outcomes if o["alternate_for"] is None]
+    good = sum(1 for o in requested if o["status"] in DELIVERED_STATUSES)
     sent = sum(1 for o in notify_outcomes if o["status"] == STATUS_SENT)
     parts: list[str] = []
-    if player_outcomes:
-        parts.append(f"played on {good}/{len(player_outcomes)} speakers")
+    if requested:
+        via = ", ".join(
+            f"{o['name']} via {names.get(o['rerouted_to'], o['rerouted_to'])}"
+            for o in requested
+            if o["status"] == STATUS_REROUTED
+        )
+        parts.append(
+            f"played on {good}/{len(requested)} speakers" + (f" ({via})" if via else "")
+        )
     if notify_outcomes:
         parts.append(f"notified {sent}/{len(notify_outcomes)} targets")
     head = ", ".join(parts) or "nothing to do"

@@ -13,3 +13,16 @@ def async_track_state_change_event(hass, entity_ids, action):
                 listeners.remove(action)
 
     return _unsub
+
+
+def async_track_time_interval(
+    hass, action, interval, *, name=None, cancel_on_shutdown=None
+):
+    """Remember `action`; tests fire it with `hass.fire_intervals()`."""
+    hass.interval_listeners.append(action)
+
+    def _unsub() -> None:
+        if action in hass.interval_listeners:
+            hass.interval_listeners.remove(action)
+
+    return _unsub

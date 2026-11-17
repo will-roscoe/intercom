@@ -13,6 +13,11 @@ CONF_WAIT_TIMEOUT: Final = "wait_timeout"
 CONF_START_TIMEOUT: Final = "start_timeout"
 CONF_MAX_ATTEMPTS: Final = "max_attempts"
 CONF_UNMUTE: Final = "unmute"
+CONF_CHIME: Final = "chime"
+CONF_CHIME_MEDIA: Final = "chime_media"
+CONF_CHIME_SECONDS: Final = "chime_seconds"
+# Hours a held message waits before it is dropped; unset means never.
+CONF_HOLD_EXPIRY: Final = "hold_expiry"
 
 # Defaults
 DEFAULT_TTS_ENGINE: Final = "tts.piper"
@@ -24,6 +29,11 @@ DEFAULT_WAIT_TIMEOUT: Final = 30
 DEFAULT_START_TIMEOUT: Final = 8
 DEFAULT_MAX_ATTEMPTS: Final = 2
 DEFAULT_UNMUTE: Final = True
+# Chime before the message: off unless the integration, card or call asks.
+DEFAULT_CHIME: Final = False
+# Pause after the chime before speaking: the bundled chime's length plus a
+# margin, so the chime has finished before the playback check starts.
+DEFAULT_CHIME_SECONDS: Final = 1.5
 
 # Delay after setting volume so the level is applied before audio starts.
 VOLUME_SETTLE_SECONDS: Final = 0.4
@@ -44,6 +54,10 @@ ATTR_RESTORE_VOLUME: Final = "restore_volume"
 ATTR_CRITICAL: Final = "critical"
 ATTR_VERIFY: Final = "verify"
 ATTR_MAX_ATTEMPTS: Final = "max_attempts"
+ATTR_ALTERNATES: Final = "alternates"
+ATTR_CHIME: Final = "chime"
+ATTR_HOLD: Final = "hold"
+ATTR_HOLD_LABEL: Final = "hold_label"
 
 # Fired on the HA event bus after every broadcast so cards/automations can react.
 # NOTE: only admins may subscribe to custom events over the websocket API, so the
@@ -69,9 +83,15 @@ STATUS_UNSUPPORTED: Final = "unsupported"
 STATUS_SILENT: Final = "silent"
 # Notify target delivered / not delivered.
 STATUS_SENT: Final = "sent"
+# The speaker could not play, and one of its alternates delivered the message
+# instead (``rerouted_to`` names which).
+STATUS_REROUTED: Final = "rerouted"
 
 # Statuses that mean the message definitely reached someone.
-DELIVERED_STATUSES: Final = frozenset({STATUS_PLAYED, STATUS_SENT})
+DELIVERED_STATUSES: Final = frozenset({STATUS_PLAYED, STATUS_SENT, STATUS_REROUTED})
+# Statuses after which a speaker's alternates are tried: nothing came out, and
+# nothing could have, so playing elsewhere cannot repeat the message.
+FALLBACK_STATUSES: Final = frozenset({STATUS_OFFLINE, STATUS_UNSUPPORTED})
 
 # States that mean "don't try to play here".
 UNAVAILABLE_STATES: Final = frozenset({"unavailable", "unknown", "none", ""})
@@ -87,12 +107,24 @@ FEATURE_VOLUME_MUTE: Final = 8
 # Websocket API. Home Assistant only lets admins subscribe to arbitrary bus
 # events, so the card subscribes to this narrow command of ours instead.
 WS_TYPE_SUBSCRIBE_RESULT: Final = f"{DOMAIN}/subscribe_result"
+WS_TYPE_SUBSCRIBE_HELD: Final = f"{DOMAIN}/subscribe_held"
+WS_TYPE_CANCEL_HELD: Final = f"{DOMAIN}/cancel_held"
 
 # Frontend card
 URL_BASE: Final = "/intercom"
+# The bundled chime, served from the integration package (www/).
+CHIME_FILENAME: Final = "chime.mp3"
+CHIME_URL: Final = f"{URL_BASE}/{CHIME_FILENAME}"
 CARD_FILENAME: Final = "intercom-card.js"
 
 # Marker in hass.data so we only register static paths / JS once per HA run.
 DATA_CARD_REGISTERED: Final = f"{DOMAIN}_card_registered"
 # Last broadcast result, replayed to a card the moment it subscribes.
 DATA_LAST_RESULT: Final = f"{DOMAIN}_last_result"
+# One asyncio.Lock per speaker: a speaker plays one message at a time.
+DATA_SPEAKER_LOCKS: Final = f"{DOMAIN}_speaker_locks"
+# The HeldMessages instance (held.py).
+DATA_HELD: Final = f"{DOMAIN}_held"
+# Held messages are re-checked this often, for conditions no entity change
+# announces (templates, time).
+HELD_CHECK_SECONDS: Final = 60

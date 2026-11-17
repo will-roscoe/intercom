@@ -100,3 +100,39 @@ broadcast:
           max: 5
           step: 1
           mode: box
+    alternates:
+      name: Alternates
+      description: >-
+        Per speaker, the speakers to play on instead, in order, when it is
+        offline or cannot play media. Each key must be one of the players.
+      required: false
+      example: '{"media_player.kitchen": ["media_player.lounge"]}'
+      selector:
+        object:
+    chime:
+      name: Chime
+      description: >-
+        Play a chime before the message: true or false for every speaker, or (in
+        YAML) a list of speakers. Their alternates chime too. Leave out to use
+        the integration setting.
+      required: false
+      selector:
+        boolean:
+    hold:
+      name: Hold until
+      description: >-
+        Conditions, as in an automation's `conditions:`, that must all be true
+        before the message is sent. If they already are, it is sent now;
+        otherwise it is held (across restarts) and sent when they become true.
+      required: false
+      example: '[{"condition": "state", "entity_id": "person.will", "state": "home"}]'
+      selector:
+        object:
+    hold_label:
+      name: Hold label
+      description: >-
+        Words for what the message is waiting for, shown as "held until ...".
+      required: false
+      example: Will is home
+      selector:
+        text:

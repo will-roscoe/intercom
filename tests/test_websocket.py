@@ -47,7 +47,11 @@ def test_registering_twice_is_safe():
     hass = new_hass()
     registered_handler(hass)
     registered_handler(hass)
-    assert list(websocket_api.HANDLERS) == [WS_TYPE_SUBSCRIBE_RESULT]
+    assert list(websocket_api.HANDLERS) == [
+        WS_TYPE_SUBSCRIBE_RESULT,
+        "intercom/subscribe_held",
+        "intercom/cancel_held",
+    ]
 
 
 def test_a_non_admin_receives_results():
@@ -103,3 +107,69 @@ def test_unsubscribing_detaches_the_listener():
 
     assert going.messages == []
     assert len(staying.messages) == 1
+
+
+# --- held messages -------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+from homeassistant.helpers.storage import Store  # noqa: E402
+from intercom.const import (  # noqa: E402
+    DATA_HELD,
+    WS_TYPE_CANCEL_HELD,
+    WS_TYPE_SUBSCRIBE_HELD,
+)
+from intercom.held import HeldMessages  # noqa: E402
+
+PERSON = "person.will"
+HOLD = [{"condition": "state", "entity_id": PERSON, "state": "home"}]
+
+
+async def held_hass():
+    Store.DISK.clear()
+    hass = new_hass()
+    hass.states.set(PERSON, "not_home")
+
+    async def send(data):
+        return {}
+
+    held = HeldMessages(hass, dict, send)
+    await held.async_load()
+    hass.data[DATA_HELD] = held
+    async_register_websocket_api(hass)
+    return hass, held
+
+
+def test_subscribing_to_held_messages_gets_the_list_and_its_changes():
+    async def scenario():
+        hass, held = await held_hass()
+        await held.async_submit({"message": "one", "players": []}, HOLD, "Will is home")
+        handler, _ = websocket_api.HANDLERS[WS_TYPE_SUBSCRIBE_HELD]
+        connection = websocket_api.ActiveConnection(User("Nikki", False))
+        handler(hass, connection, {"id": 7, "type": WS_TYPE_SUBSCRIBE_HELD})
+        await held.async_submit({"message": "two", "players": []}, HOLD, None)
+        connection.subscriptions[7]()  # what core's unsubscribe does
+        await held.async_submit({"message": "three", "players": []}, HOLD, None)
+        return connection
+
+    connection = asyncio.run(scenario())
+    assert connection.results == [(7, None)]
+    lists = [[i["message"] for i in m["event"]["held"]] for m in connection.messages]
+    assert lists == [["one"], ["one", "two"]]
+
+
+def test_cancelling_a_held_message_over_the_websocket():
+    async def scenario():
+        hass, held = await held_hass()
+        result = await held.async_submit({"message": "one", "players": []}, HOLD, None)
+        handler, schema = websocket_api.HANDLERS[WS_TYPE_CANCEL_HELD]
+        connection = websocket_api.ActiveConnection(User("Nikki", False))
+        # Core adds and checks the message "id" itself.
+        fields = schema({"type": WS_TYPE_CANCEL_HELD, "held_id": result["id"]})
+        msg = {"id": 8, **fields}
+        await handler(hass, connection, msg)
+        return connection, held.items()
+
+    connection, items = asyncio.run(scenario())
+    assert connection.results == [(8, {"cancelled": True})]
+    assert items == []

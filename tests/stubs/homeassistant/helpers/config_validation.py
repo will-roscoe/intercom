@@ -31,7 +31,9 @@ def boolean(value):
         if lowered in ("0", "false", "no", "off", "disable"):
             return False
         raise vol.Invalid(f"invalid boolean value {value}")
-    return bool(value)
+    if isinstance(value, (int, float)):
+        return value != 0
+    raise vol.Invalid(f"invalid boolean value {value}")
 
 
 def ensure_list(value):
@@ -39,3 +41,12 @@ def ensure_list(value):
     if value is None:
         return []
     return value if isinstance(value, list) else [value]
+
+
+def _condition(value):
+    if not isinstance(value, dict) or "condition" not in value:
+        raise vol.Invalid(f"expected a condition, got {value!r}")
+    return value
+
+
+CONDITIONS_SCHEMA = vol.All(ensure_list, [_condition])
