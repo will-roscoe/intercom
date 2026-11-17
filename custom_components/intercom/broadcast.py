@@ -544,19 +544,15 @@ async def async_run_players(
     def speak(entity_id: str) -> tuple[asyncio.Future, bool]:
         """Return the player's speak task, and whether the caller owns its row.
 
-        Only a requested player without alternates waits out offline retries.
-        The caller owns the row of an unrequested player whose task it started.
+        A requested player waits out its offline retries before any alternate
+        is tried; an alternate that is offline is passed over at once. The
+        caller owns the row of an unrequested player whose task it started.
         """
         if entity_id in started:
             return started[entity_id], False
         requested = entity_id in request.players
         started[entity_id] = asyncio.ensure_future(
-            _async_speak_isolated(
-                hass,
-                request,
-                entity_id,
-                requested and entity_id not in request.alternates,
-            )
+            _async_speak_isolated(hass, request, entity_id, requested)
         )
         return started[entity_id], not requested
 
