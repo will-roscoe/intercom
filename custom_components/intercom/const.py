@@ -103,3 +103,5 @@ CARD_FILENAME: Final = "intercom-card.js"
 DATA_CARD_REGISTERED: Final = f"{DOMAIN}_card_registered"
 # Last broadcast result, replayed to a card the moment it subscribes.
 DATA_LAST_RESULT: Final = f"{DOMAIN}_last_result"
+# One asyncio.Lock per speaker: a speaker plays one message at a time.
+DATA_SPEAKER_LOCKS: Final = f"{DOMAIN}_speaker_locks"

@@ -670,3 +670,52 @@ def test_cancelling_a_broadcast_stops_its_speakers():
         return hass
 
     assert spoken_to(run(scenario())) == []
+
+
+# --- one message at a time per speaker ------------------------------------------
+
+
+def timed_speak(log: list):
+    """A tts.speak that takes 0.1 s and logs when each message starts and ends."""
+
+    async def speak(hass_, data):
+        log.append(("start", data["media_player_entity_id"], data["message"]))
+        await asyncio.sleep(0.1)
+        log.append(("end", data["media_player_entity_id"], data["message"]))
+
+    return speak
+
+
+def test_two_broadcasts_to_one_speaker_take_turns():
+    async def scenario():
+        hass = new_hass()
+        log: list = []
+        register_speak(hass, timed_speak(log))
+        first = make_request(message="one", verify=False, max_attempts=1)
+        second = make_request(message="two", verify=False, max_attempts=1)
+        await asyncio.gather(
+            async_run_players(hass, first, True), async_run_players(hass, second, True)
+        )
+        return log
+
+    log = run(scenario())
+    assert [entry[0] for entry in log] == ["start", "end", "start", "end"]
+
+
+def test_broadcasts_to_different_speakers_still_overlap():
+    async def scenario():
+        hass = new_hass()
+        log: list = []
+        register_speak(hass, timed_speak(log))
+        to_sonos = make_request(message="one", verify=False, max_attempts=1)
+        to_study = make_request(
+            message="two", players=(STUDY,), verify=False, max_attempts=1
+        )
+        await asyncio.gather(
+            async_run_players(hass, to_sonos, True),
+            async_run_players(hass, to_study, True),
+        )
+        return log
+
+    log = run(scenario())
+    assert [entry[0] for entry in log] == ["start", "start", "end", "end"]
