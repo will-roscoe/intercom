@@ -8,7 +8,7 @@ import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { card } from "./load-card.mjs";
+import { card, defined } from "./load-card.mjs";
 
 const {
   assertEditable,
@@ -371,4 +371,84 @@ test("configs the form would lose part of are refused", () => {
   ]) {
     assert.throws(() => assertEditable({ type: TYPE, ...config }), Error, JSON.stringify(config));
   }
+});
+
+// --- the editor element ------------------------------------------------------
+
+function openEditor(config, hass = HASS) {
+  const el = card.IntercomCard.getConfigElement();
+  el.setConfig(config);
+  el.hass = hass;
+  const form = el.children.find((c) => c.localName === "ha-form");
+  return { el, form };
+}
+
+test("the card offers its visual editor", () => {
+  const el = card.IntercomCard.getConfigElement();
+  assert.equal(el.localName, "intercom-card-editor");
+  assert.ok(el instanceof defined.get("intercom-card-editor"));
+});
+
+test("the card picker shows a live preview", () => {
+  const entry = globalThis.customCards.find((c) => c.type === "intercom-card");
+  assert.equal(entry.preview, true);
+});
+
+test("the editor refuses a config the form cannot show", () => {
+  const el = card.IntercomCard.getConfigElement();
+  assert.throws(() => el.setConfig({ type: TYPE, players: {} }), /visual editor/);
+});
+
+test("the editor shows the config in HA's form", () => {
+  const { form } = openEditor({ type: TYPE, chime: true });
+  assert.ok(form, "an ha-form");
+  assert.equal(form.hass, HASS);
+  assert.equal(form.data.chime, "on");
+  assert.equal(form.data.show_volume, true);
+  assert.deepEqual(form.schema, editorSchema(HASS, { type: TYPE, chime: true }));
+  assert.equal(form.computeLabel({ name: "players" }), "Speakers");
+  assert.ok(form.computeHelper({ name: "critical" }));
+});
+
+test("an edit in the form becomes one config-changed with the card's YAML", () => {
+  const { el, form } = openEditor({ type: TYPE, chime: true, mystery: 1 });
+  const seen = [];
+  el.addEventListener("config-changed", (ev) => seen.push(ev));
+  form.dispatchEvent(
+    new CustomEvent("value-changed", {
+      detail: { value: { ...form.data, chime: "off", title: "Hall" } },
+    })
+  );
+  assert.equal(seen.length, 1);
+  assert.deepEqual(seen[0].detail.config, {
+    type: TYPE,
+    chime: false,
+    mystery: 1,
+    title: "Hall",
+  });
+  assert.equal(seen[0].bubbles, true);
+  assert.equal(seen[0].composed, true);
+});
+
+test("the form follows the config HA sends back", () => {
+  const { el, form } = openEditor({ type: TYPE });
+  el.setConfig({ type: TYPE, title: "Hall" });
+  assert.equal(form.data.title, "Hall");
+});
+
+test("the form is rebuilt only when the notify targets change", () => {
+  const { el, form } = openEditor({ type: TYPE });
+  const schema = form.schema;
+  el.hass = { ...HASS, states: { ...HASS.states, "light.x": { state: "on", attributes: {} } } };
+  assert.equal(form.schema, schema, "same schema after an unrelated state change");
+  el.hass = {
+    ...HASS,
+    services: { ...HASS.services, notify: { ...HASS.services.notify, mobile_app_tablet: {} } },
+  };
+  assert.notEqual(form.schema, schema);
+  assert.ok(
+    findField(form.schema, "notify").selector.object.fields.service.selector.select.options.some(
+      (o) => o.value === "notify.mobile_app_tablet"
+    )
+  );
 });

@@ -39,6 +39,9 @@
  *   notify:                    # optional
  *     - service: notify.mobile_app_phone
  *       name: My Phone
+ *
+ * Every option can also be set in the card's visual editor (the Edit dialog),
+ * which shows each one with help text; see "visual editor" below.
  */
 
 // The integration serves this file as `intercom-card.js?v=<manifest version>`
@@ -79,6 +82,10 @@ export class IntercomCard extends HTMLElement {
     this._lastResult = null;
     this._lastResultReplay = false;
     this._statusText = "";
+  }
+
+  static getConfigElement() {
+    return document.createElement("intercom-card-editor");
   }
 
   static getStubConfig() {
@@ -1088,6 +1095,60 @@ export function editorHelper(schema) {
   return EDITOR_HELP[schema.name] || "";
 }
 
+/**
+ * The card's edit dialog: one ha-form showing every option. Home Assistant
+ * calls `setConfig` (which throws for a config the form cannot show, keeping
+ * the dialog in YAML) and sets `hass`; each edit fires `config-changed` with
+ * the card's new config.
+ */
+class IntercomCardEditor extends HTMLElement {
+  setConfig(config) {
+    assertEditable(config);
+    this._config = config;
+    this._draw();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._draw();
+  }
+
+  _draw() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = editorLabel;
+      this._form.computeHelper = editorHelper;
+      this._form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this._config = fromFormData(ev.detail.value, this._config);
+        this._shown = this._config;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: this._config },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    // hass changes with every state change; a new schema or data object would
+    // redraw the whole form each time, so each is replaced only when it changes.
+    const schema = editorSchema(this._hass, this._config);
+    const key = JSON.stringify(schema);
+    if (key !== this._schemaKey) {
+      this._schemaKey = key;
+      this._form.schema = schema;
+    }
+    if (this._shown !== this._config || !this._form.data) {
+      this._shown = this._config;
+      this._form.data = toFormData(this._config);
+    }
+  }
+}
+
 const STYLES = `
   :host { display: block; }
   .content { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -1203,6 +1264,9 @@ const STYLES = `
 if (!customElements.get("intercom-card")) {
   customElements.define("intercom-card", IntercomCard);
 }
+if (!customElements.get("intercom-card-editor")) {
+  customElements.define("intercom-card-editor", IntercomCardEditor);
+}
 
 window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === "intercom-card")) {
@@ -1211,7 +1275,7 @@ if (!window.customCards.some((c) => c.type === "intercom-card")) {
     name: "Intercom Card",
     description:
       "Type a message, pick speakers (with volume) and notify targets, and broadcast.",
-    preview: false,
+    preview: true,
     documentationURL: "https://github.com/will-roscoe/intercom",
   });
 }
