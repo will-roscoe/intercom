@@ -299,14 +299,18 @@ test("every option has a label and help text", () => {
       continue;
     }
     const field = findField(schema, name);
-    assert.ok(editorLabel(field), `${name} label`);
     if (LISTS.includes(name)) {
-      // HA's list control shows no helper, so a line of text sits above it.
-      const row = findField(schema, `${name}_help`);
-      assert.equal(row.type, "constant", `${name} help row`);
-      assert.ok(editorLabel(row), `${name} help text`);
+      // HA's list control shows no helper, so a heading row with the help sits
+      // above it, and the list's own label is left empty so it is not repeated.
+      const index = schema.flatMap((f) => f.schema || [f]).indexOf(field);
+      const row = schema.flatMap((f) => f.schema || [f])[index - 1];
+      assert.equal(row.type, "constant", `${name} heading row`);
+      assert.ok(editorLabel(row), `${name} heading`);
+      assert.ok(row.value, `${name} help`);
+      assert.equal(editorLabel(field), "", `${name} label shown once`);
       assert.equal(editorHelper(field), "", `${name} help shown once`);
     } else {
+      assert.ok(editorLabel(field), `${name} label`);
       assert.ok(editorHelper(field), `${name} help`);
     }
   }
@@ -406,7 +410,7 @@ test("the editor shows the config in HA's form", () => {
   assert.equal(form.data.chime, "on");
   assert.equal(form.data.show_volume, true);
   assert.deepEqual(form.schema, editorSchema(HASS, { type: TYPE, chime: true }));
-  assert.equal(form.computeLabel({ name: "players" }), "Speakers");
+  assert.equal(form.computeLabel({ name: "title" }), "Title");
   assert.ok(form.computeHelper({ name: "critical" }));
 });
 

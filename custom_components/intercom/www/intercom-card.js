@@ -797,14 +797,17 @@ export const EDITOR_LABELS = {
   holds: "Hold until",
 };
 
-/** Help text under (or, for the lists, above) each card option; as in the README. */
+/**
+ * Help text under each card option, as in the README. The lists show theirs
+ * after their label in a heading row above them.
+ */
 export const EDITOR_HELP = {
   title: "Card header. Leave empty for none.",
   players:
-    "Speakers to offer. Leave empty to offer every media player. Each can have its " +
-    "own name, chime and alternates: speakers played on instead, in order, when it " +
-    "is offline or cannot play media.",
-  notify: "Notify targets to offer, such as a phone.",
+    "Leave empty to offer every media player. Each speaker can have its own name, " +
+    "chime and alternates: speakers played on instead, in order, when it is offline " +
+    "or cannot play media.",
+  notify: "Phones and other notify targets to offer.",
   show_volume: "Show a slider to set the volume of the message.",
   default_volume: "Where the volume slider starts.",
   volume_step: "How far the slider moves per step.",
@@ -953,8 +956,9 @@ export function notifyOptions(hass, configured = []) {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-// A line of help text above a list: HA's list control shows no helper of its own.
-const helpRow = (name) => ({ type: "constant", name: name + HELP_ROW });
+// A heading row above a list, "<label>: <help>": HA's list control shows no
+// helper of its own, so the list's own label is left empty instead.
+const helpRow = (name) => ({ type: "constant", name: name + HELP_ROW, value: EDITOR_HELP[name] });
 
 /**
  * Return the ha-form schema for the card's edit dialog: title, speakers,
@@ -1083,13 +1087,17 @@ export function editorSchema(hass, config = {}) {
   ];
 }
 
-/** ha-form `computeLabel`: an option's label, or a help row's text. */
+/**
+ * ha-form `computeLabel`: an option's label; for a list, "" (its heading row
+ * above carries the label).
+ */
 export function editorLabel(schema) {
-  if (schema.type === "constant") return EDITOR_HELP[schema.name.slice(0, -HELP_ROW.length)] || "";
+  if (schema.type === "constant") return EDITOR_LABELS[schema.name.slice(0, -HELP_ROW.length)] || "";
+  if (LIST_OPTIONS.includes(schema.name)) return "";
   return EDITOR_LABELS[schema.name] || schema.name;
 }
 
-/** ha-form `computeHelper`: help under an option; the lists have a row above instead. */
+/** ha-form `computeHelper`: help under an option; "" for a list (its heading row has it). */
 export function editorHelper(schema) {
   if (LIST_OPTIONS.includes(schema.name)) return "";
   return EDITOR_HELP[schema.name] || "";
