@@ -39,6 +39,9 @@
  *   notify:                    # optional
  *     - service: notify.mobile_app_phone
  *       name: My Phone
+ *
+ * Every option can also be set in the card's visual editor (the Edit dialog),
+ * which shows each one with help text; see "visual editor" below.
  */
 
 // The integration serves this file as `intercom-card.js?v=<manifest version>`
@@ -60,7 +63,7 @@ const STATUS_TEXT = {
   unsupported: "cannot play media",
 };
 
-class IntercomCard extends HTMLElement {
+export class IntercomCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
@@ -79,6 +82,10 @@ class IntercomCard extends HTMLElement {
     this._lastResult = null;
     this._lastResultReplay = false;
     this._statusText = "";
+  }
+
+  static getConfigElement() {
+    return document.createElement("intercom-card-editor");
   }
 
   static getStubConfig() {
@@ -757,6 +764,407 @@ class IntercomCard extends HTMLElement {
   }
 }
 
+// --- visual editor -------------------------------------------------------------
+//
+// The card's edit dialog shows one ha-form. The functions below translate the
+// card's YAML to the form's data and back, build the form from what Home
+// Assistant has, and refuse a config the form could not show without losing
+// part of it. They are exported for tests/card.
+
+/** Card options, and the value the card uses when one is left out. */
+export const EDITOR_DEFAULTS = Object.freeze({
+  show_volume: true,
+  default_volume: 40,
+  volume_step: 5,
+  show_critical: false,
+  critical: false,
+  players: [],
+  notify: [],
+  holds: [],
+});
+
+/** Form label of each card option. */
+export const EDITOR_LABELS = {
+  title: "Title",
+  players: "Speakers",
+  notify: "Notify targets",
+  show_volume: "Show the volume slider",
+  default_volume: "Starting volume",
+  volume_step: "Volume slider step",
+  chime: "Chime",
+  show_critical: "Show the Critical toggle",
+  critical: "Critical",
+  holds: "Hold until",
+};
+
+/**
+ * Help text under each card option, as in the README. The lists show theirs
+ * after their label in a heading row above them.
+ */
+export const EDITOR_HELP = {
+  title: "Card header. Leave empty for none.",
+  players:
+    "Leave empty to offer every media player. Each speaker can have its own name, " +
+    "chime and alternates: speakers played on instead, in order, when it is offline " +
+    "or cannot play media.",
+  notify: "Phones and other notify targets to offer.",
+  show_volume: "Show a slider to set the volume of the message.",
+  default_volume: "Where the volume slider starts.",
+  volume_step: "How far the slider moves per step.",
+  chime:
+    "Chime before the message on every speaker from this card. A speaker's own " +
+    "chime overrides it. Leave empty to use the integration setting.",
+  show_critical: "Show a Critical toggle beside the Broadcast button.",
+  critical:
+    "Critical messages retry harder and fail loudly. With the toggle shown, this " +
+    "is where it starts; without it, every broadcast from this card is critical.",
+  holds:
+    "Choices for holding a message until conditions are met, such as someone " +
+    "getting home. Held messages, from anyone, are listed on the card with a " +
+    "Cancel button.",
+};
+
+const LIST_OPTIONS = ["players", "notify", "holds"];
+const HELP_ROW = "_help";
+
+const CHIME_OPTIONS = [
+  { value: "on", label: "Chime" },
+  { value: "off", label: "No chime" },
+];
+
+const asList = (value) => (Array.isArray(value) ? value : []);
+const isObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// `chime` in the YAML is true, false or absent; in the form "on", "off" or unset.
+// Both directions accept either form, so mapping twice changes nothing.
+const chimeToForm = (v) => (v === true || v === "on" ? "on" : v === false || v === "off" ? "off" : undefined);
+const chimeFromForm = (v) => (v === true || v === "on" ? true : v === false || v === "off" ? false : undefined);
+
+// Set `key`, or remove it when the value is empty.
+function setOrDrop(obj, key, value) {
+  if (value === undefined || value === null || value === "") delete obj[key];
+  else obj[key] = value;
+}
+
+/**
+ * Throw an Error saying why when the form could not show `config` without
+ * losing part of it; Home Assistant then keeps the card in YAML mode and shows
+ * the message. Returns nothing for a config the form can show.
+ */
+export function assertEditable(config) {
+  const fail = (why) => {
+    throw new Error(`The visual editor cannot show this card: ${why}.`);
+  };
+  const isChime = (v) => v === undefined || typeof v === "boolean";
+  for (const key of LIST_OPTIONS) {
+    if (config[key] != null && !Array.isArray(config[key])) fail(`${key} must be a list`);
+  }
+  if (!isChime(config.chime)) fail("chime must be true or false");
+  for (const p of asList(config.players)) {
+    if (typeof p === "string") continue;
+    if (!isObject(p)) fail("each speaker must be an entity, or an entry with entity");
+    const alts = p.alternates;
+    if (alts != null && typeof alts !== "string" && !Array.isArray(alts))
+      fail(`the alternates of ${p.entity} must be a list`);
+    if (!isChime(p.chime)) fail(`the chime of ${p.entity} must be true or false`);
+  }
+  for (const n of asList(config.notify)) {
+    if (typeof n !== "string" && !isObject(n))
+      fail("each notify target must be a service, or an entry with service");
+  }
+  for (const h of asList(config.holds)) {
+    if (!isObject(h)) fail("each hold must be an entry with name and conditions");
+  }
+}
+
+/**
+ * Return the form data for a card config: a copy with absent options at their
+ * EDITOR_DEFAULTS, shorthand entries in full (`{entity}`, `{service}`,
+ * `alternates` and a hold's `conditions` as lists) and `chime` as
+ * "on"/"off"/unset. Other keys are kept.
+ */
+export function toFormData(config) {
+  const form = { ...config };
+  for (const [key, value] of Object.entries(EDITOR_DEFAULTS)) {
+    if (form[key] == null) form[key] = Array.isArray(value) ? [] : value;
+  }
+  form.players = asList(form.players).map((p) => {
+    const item = typeof p === "string" ? { entity: p } : { ...p };
+    if (typeof item.alternates === "string") item.alternates = [item.alternates];
+    setOrDrop(item, "chime", chimeToForm(item.chime));
+    return item;
+  });
+  form.notify = asList(form.notify).map((n) =>
+    typeof n === "string" ? { service: n } : { ...n }
+  );
+  // The service takes one condition (or a template string) in place of a
+  // list; HA's condition editor needs the list.
+  form.holds = asList(form.holds).map((h) =>
+    h.conditions == null || Array.isArray(h.conditions)
+      ? h
+      : { ...h, conditions: [h.conditions] }
+  );
+  setOrDrop(form, "chime", chimeToForm(form.chime));
+  return form;
+}
+
+/**
+ * Return the card config for edited form data, given the config the form was
+ * opened with. Keys the form does not know are kept; `chime` goes back to
+ * true/false/absent; empty names, titles and alternates are left out; and an
+ * option is left out while it is at its default, unless the original config
+ * spelled it out and the edit did not touch it.
+ */
+export function fromFormData(form, original) {
+  const config = { ...original, ...form };
+  config.players = asList(config.players).map((p) => {
+    const item = { ...p };
+    setOrDrop(item, "chime", chimeFromForm(item.chime));
+    setOrDrop(item, "name", item.name);
+    if (!asList(item.alternates).length) delete item.alternates;
+    return item;
+  });
+  config.notify = asList(config.notify).map((n) => {
+    const item = { ...n };
+    setOrDrop(item, "name", item.name);
+    return item;
+  });
+  setOrDrop(config, "chime", chimeFromForm(config.chime));
+  setOrDrop(config, "title", config.title);
+  for (const [key, value] of Object.entries(EDITOR_DEFAULTS)) {
+    const untouched = key in original && sameValue(original[key], config[key]);
+    if (!untouched && sameValue(config[key], value)) delete config[key];
+  }
+  return config;
+}
+
+/**
+ * Return the notify targets to offer, as `{value, label}` sorted by label:
+ * every `notify.*` entity (labelled with its friendly name), every notify
+ * service except `send_message`, and any `configured` target HA does not offer
+ * now, so a removed phone still shows. `hass` may be undefined.
+ */
+export function notifyOptions(hass, configured = []) {
+  const options = new Map();
+  const add = (value, label) => {
+    if (value && !options.has(value)) options.set(value, label || value);
+  };
+  for (const [id, st] of Object.entries((hass && hass.states) || {})) {
+    if (id.startsWith("notify.")) add(id, st && st.attributes && st.attributes.friendly_name);
+  }
+  const services = (hass && hass.services && hass.services.notify) || {};
+  for (const name of Object.keys(services)) {
+    if (name !== "send_message") add(`notify.${name}`);
+  }
+  for (const value of configured) add(value);
+  return [...options]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+// A heading row above a list, "<label>: <help>": HA's list control shows no
+// helper of its own, so the list's own label is left empty instead.
+const helpRow = (name) => ({ type: "constant", name: name + HELP_ROW, value: EDITOR_HELP[name] });
+
+/**
+ * Return the ha-form schema for the card's edit dialog: title, speakers,
+ * notify targets (offered from `hass`, keeping those in `config`), then
+ * collapsed Volume, Chime and critical, and Hold until sections.
+ */
+export function editorSchema(hass, config = {}) {
+  const configured = asList(config && config.notify)
+    .map((n) => (typeof n === "string" ? n : n && n.service))
+    .filter(Boolean);
+  const mediaPlayer = { domain: "media_player" };
+  const section = (title, icon, schema) => ({
+    type: "expandable",
+    name: "",
+    flatten: true,
+    title,
+    icon,
+    schema,
+  });
+  return [
+    { name: "title", selector: { text: {} } },
+    helpRow("players"),
+    {
+      name: "players",
+      selector: {
+        object: {
+          multiple: true,
+          label_field: "entity",
+          description_field: "name",
+          fields: {
+            entity: {
+              label: "Speaker",
+              description: "The media player to speak the message on.",
+              required: true,
+              selector: { entity: { filter: mediaPlayer } },
+            },
+            name: {
+              label: "Name",
+              description: "Shown on the card instead of the speaker's own name.",
+              selector: { text: {} },
+            },
+            chime: {
+              label: "Chime",
+              description: "Overrides the card's chime for this speaker. Leave empty to follow the card.",
+              selector: { select: { mode: "dropdown", options: CHIME_OPTIONS } },
+            },
+            alternates: {
+              label: "Alternates",
+              description:
+                "Speakers to play on instead, in order, when this one is offline or cannot play media.",
+              selector: { entity: { multiple: true, reorder: true, filter: mediaPlayer } },
+            },
+          },
+        },
+      },
+    },
+    helpRow("notify"),
+    {
+      name: "notify",
+      selector: {
+        object: {
+          multiple: true,
+          label_field: "service",
+          description_field: "name",
+          fields: {
+            service: {
+              label: "Target",
+              description: "A notify service or notify entity. Pick one, or type its name.",
+              required: true,
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  custom_value: true,
+                  options: notifyOptions(hass, configured),
+                },
+              },
+            },
+            name: {
+              label: "Name",
+              description: "Shown on the card instead of the target's own name.",
+              selector: { text: {} },
+            },
+          },
+        },
+      },
+    },
+    section("Volume", "mdi:volume-high", [
+      { name: "show_volume", selector: { boolean: {} } },
+      {
+        name: "default_volume",
+        selector: { number: { min: 0, max: 100, step: 1, mode: "slider", unit_of_measurement: "%" } },
+      },
+      { name: "volume_step", selector: { number: { min: 1, max: 50, step: 1, mode: "box" } } },
+    ]),
+    section("Chime and critical", "mdi:bell-ring-outline", [
+      { name: "chime", selector: { select: { mode: "dropdown", options: CHIME_OPTIONS } } },
+      { name: "show_critical", selector: { boolean: {} } },
+      { name: "critical", selector: { boolean: {} } },
+    ]),
+    section("Hold until", "mdi:timer-pause-outline", [
+      helpRow("holds"),
+      {
+        name: "holds",
+        selector: {
+          object: {
+            multiple: true,
+            label_field: "name",
+            fields: {
+              name: {
+                label: "Name",
+                description: "Shown as the choice, and as “held until …” on the card.",
+                required: true,
+                selector: { text: {} },
+              },
+              conditions: {
+                label: "Conditions",
+                description: "The message is held until these are met, as in an automation's conditions.",
+                required: true,
+                selector: { condition: {} },
+              },
+            },
+          },
+        },
+      },
+    ]),
+  ];
+}
+
+/**
+ * ha-form `computeLabel`: an option's label; for a list, "" (its heading row
+ * above carries the label).
+ */
+export function editorLabel(schema) {
+  if (schema.type === "constant") return EDITOR_LABELS[schema.name.slice(0, -HELP_ROW.length)] || "";
+  if (LIST_OPTIONS.includes(schema.name)) return "";
+  return EDITOR_LABELS[schema.name] || schema.name;
+}
+
+/** ha-form `computeHelper`: help under an option; "" for a list (its heading row has it). */
+export function editorHelper(schema) {
+  if (LIST_OPTIONS.includes(schema.name)) return "";
+  return EDITOR_HELP[schema.name] || "";
+}
+
+/**
+ * The card's edit dialog: one ha-form showing every option. Home Assistant
+ * calls `setConfig` (which throws for a config the form cannot show, keeping
+ * the dialog in YAML) and sets `hass`; each edit fires `config-changed` with
+ * the card's new config.
+ */
+class IntercomCardEditor extends HTMLElement {
+  setConfig(config) {
+    assertEditable(config);
+    this._config = config;
+    this._draw();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._draw();
+  }
+
+  _draw() {
+    if (!this._hass || !this._config) return;
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = editorLabel;
+      this._form.computeHelper = editorHelper;
+      this._form.addEventListener("value-changed", (ev) => {
+        ev.stopPropagation();
+        this._config = fromFormData(ev.detail.value, this._config);
+        this._shown = this._config;
+        this.dispatchEvent(
+          new CustomEvent("config-changed", {
+            detail: { config: this._config },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    // hass changes with every state change; a new schema or data object would
+    // redraw the whole form each time, so each is replaced only when it changes.
+    const schema = editorSchema(this._hass, this._config);
+    const key = JSON.stringify(schema);
+    if (key !== this._schemaKey) {
+      this._schemaKey = key;
+      this._form.schema = schema;
+    }
+    if (this._shown !== this._config || !this._form.data) {
+      this._shown = this._config;
+      this._form.data = toFormData(this._config);
+    }
+  }
+}
+
 const STYLES = `
   :host { display: block; }
   .content { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -872,6 +1280,9 @@ const STYLES = `
 if (!customElements.get("intercom-card")) {
   customElements.define("intercom-card", IntercomCard);
 }
+if (!customElements.get("intercom-card-editor")) {
+  customElements.define("intercom-card-editor", IntercomCardEditor);
+}
 
 window.customCards = window.customCards || [];
 if (!window.customCards.some((c) => c.type === "intercom-card")) {
@@ -880,7 +1291,7 @@ if (!window.customCards.some((c) => c.type === "intercom-card")) {
     name: "Intercom Card",
     description:
       "Type a message, pick speakers (with volume) and notify targets, and broadcast.",
-    preview: false,
+    preview: true,
     documentationURL: "https://github.com/will-roscoe/intercom",
   });
 }

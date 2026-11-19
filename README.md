@@ -90,7 +90,13 @@ can be overridden per service call:
 
 ## The card
 
-Add a **Manual** card and paste:
+Add **Intercom Card** from the dashboard's card picker. Its edit dialog shows every
+option below with a line of help: pick speakers from your media players and notify
+targets from what Home Assistant has, and set hold conditions with the same editor
+automations use. On Home Assistant before 2025.7 the speaker, notify and "Hold until"
+lists appear as YAML boxes inside that form.
+
+Or add a **Manual** card and paste:
 
 ```yaml
 type: custom:intercom-card
