@@ -52,6 +52,18 @@ helpers unless you want to.
 
 ---
 
+## How it works
+
+One `intercom.broadcast` call, from start to result. Every speaker runs the middle
+column at the same time, independently; notify targets run beside them. The statuses
+in the rounded boxes are the ones the result reports (see [Speaker statuses](#speaker-statuses)).
+
+<img src="https://github.com/will-roscoe/intercom/raw/main/docs/images/flow.png" alt="Flowchart of one intercom.broadcast call: the call is checked, held until its hold conditions are met, then the speech is synthesised once. Each speaker waits its turn, is checked for being online and able to play media (falling back to its alternates if not), is unmuted and set to the broadcast volume, chimes, has its playback check armed, plays the message through tts.speak and has its volume restored. It ends played, unverified or failed, with failed retried and unverified retried only for critical calls. Notify targets are sent at the same time and end sent or failed. Everything is gathered into one result, returned to the caller, pushed to the card and fired as an event; a critical call that was not fully delivered raises an error." width="700">
+
+The diagram's source is [`docs/flow.mmd`](docs/flow.mmd).
+
+---
+
 ## Installation
 
 ### HACS (recommended)
@@ -73,6 +85,8 @@ and restart Home Assistant, then add the integration from the UI.
 Setup is via the UI. The config/options flow lets you set defaults, all of which
 can be overridden per service call:
 
+<img src="https://github.com/will-roscoe/intercom/raw/main/docs/images/options.png" alt="The Intercom options dialog: default TTS engine, default notification title, the two playback timeouts, attempts per target, unmute muted speakers, chime before every message, chime sound and pause after the chime." width="400">
+
 | Option | Default | Meaning |
 | --- | --- | --- |
 | Default TTS engine | `tts.piper` | TTS entity used to speak. |
@@ -90,11 +104,15 @@ can be overridden per service call:
 
 ## The card
 
+<img src="https://github.com/will-roscoe/intercom/raw/main/docs/images/card.png" alt="The Intercom card: a message box reading Dinner's ready in five minutes, a volume slider at 30%, speaker buttons with one selected, notify buttons, and Broadcast and Critical buttons." width="420">
+
 Add **Intercom Card** from the dashboard's card picker. Its edit dialog shows every
 option below with a line of help: pick speakers from your media players and notify
 targets from what Home Assistant has, and set hold conditions with the same editor
 automations use. On Home Assistant before 2025.7 the speaker, notify and "Hold until"
 lists appear as YAML boxes inside that form.
+
+<img src="https://github.com/will-roscoe/intercom/raw/main/docs/images/card-editor.png" alt="The card's edit dialog: title, the speakers and notify targets as lists with edit and delete buttons, and the Volume group open with its slider options, beside a live preview of the card." width="700">
 
 Or add a **Manual** card and paste:
 

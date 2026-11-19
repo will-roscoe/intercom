@@ -1,0 +1,36 @@
+%% How one intercom.broadcast call flows. Source of docs/images/flow.png; re-render with
+%% npx -y @mermaid-js/mermaid-cli -i docs/flow.mmd -o docs/images/flow.png -b white -s 2 -w 1100 -c docs/mermaid.json
+flowchart TD
+    call["intercom.broadcast<br/>from the card, an automation or a script"] --> valid{"Valid call?"}
+    valid -- no --> refused(["error raised"])
+    valid -- yes --> hold{"hold conditions?"}
+    hold -- "yes, not met yet" --> held["Held: saved across restarts,<br/>re-checked when their entities change"]
+    held -- "conditions met" --> go
+    hold -- "none, or already met" --> go["Broadcast:<br/>synthesise the speech once"]
+    go --> notify
+
+    subgraph speakers ["Each speaker, all at the same time"]
+        direction TB
+        turn["Wait its turn:<br/>one message at a time per speaker"] --> usable{"Online, and<br/>can play media?"}
+        usable -- "offline after retries,<br/>or unsupported" --> alts{"alternates?"}
+        alts -- "one plays it" --> rerouted(["rerouted"])
+        alts -- "none left" --> offline(["offline / unsupported"])
+        usable -- yes --> prepare["Unmute, set the volume, chime;<br/>arm the playback check<br/>(Sonos clip status, or player state)"]
+        prepare --> speak["tts.speak, then<br/>restore volume and mute"]
+        speak --> seen{"Seen playing?"}
+        seen -- yes --> played(["played<br/>(silent if nobody could hear it)"])
+        seen -- "no sign" --> unverified(["unverified"])
+        seen -- "call raised or timed out" --> failed(["failed"])
+        failed -. "try again" .-> usable
+        unverified -. "try again, critical only" .-> usable
+    end
+
+    subgraph targets ["Each notify target"]
+        notify["Send the notification<br/>(a notify service or entity)"] --> sent(["sent / failed"])
+    end
+
+    go --> turn
+    rerouted & offline & played & unverified & failed & sent --> result["Result: a status per target,<br/>delivered, complete, summary"]
+    result --> back["Returned to the caller,<br/>pushed to the card, fired as an event"]
+    result --> critical{"critical and not<br/>everything delivered?"}
+    critical -- yes --> raised(["error raised"])
