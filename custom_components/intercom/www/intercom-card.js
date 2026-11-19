@@ -882,7 +882,8 @@ export function assertEditable(config) {
 /**
  * Return the form data for a card config: a copy with absent options at their
  * EDITOR_DEFAULTS, shorthand entries in full (`{entity}`, `{service}`,
- * `alternates` as a list) and `chime` as "on"/"off"/unset. Other keys are kept.
+ * `alternates` and a hold's `conditions` as lists) and `chime` as
+ * "on"/"off"/unset. Other keys are kept.
  */
 export function toFormData(config) {
   const form = { ...config };
@@ -897,6 +898,13 @@ export function toFormData(config) {
   });
   form.notify = asList(form.notify).map((n) =>
     typeof n === "string" ? { service: n } : { ...n }
+  );
+  // The service takes one condition (or a template string) in place of a
+  // list; HA's condition editor needs the list.
+  form.holds = asList(form.holds).map((h) =>
+    h.conditions == null || Array.isArray(h.conditions)
+      ? h
+      : { ...h, conditions: [h.conditions] }
   );
   setOrDrop(form, "chime", chimeToForm(form.chime));
   return form;

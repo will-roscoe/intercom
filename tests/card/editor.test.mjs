@@ -132,6 +132,25 @@ test("shorthand entries open as full entries", () => {
   assert.deepEqual(form.notify, [{ service: "notify.mobile_app_phone" }]);
 });
 
+test("a hold with a single condition opens as a list of one", () => {
+  // The service accepts one condition or a template string where a list is
+  // expected (cv.CONDITIONS_SCHEMA); HA's condition editor needs the list.
+  const state = { condition: "state", entity_id: "person.will", state: "home" };
+  const template = "{{ is_state('person.will', 'home') }}";
+  const form = toFormData({
+    type: TYPE,
+    holds: [
+      { name: "One", conditions: state },
+      { name: "Template", conditions: template },
+      { name: "List", conditions: [state] },
+    ],
+  });
+  assert.deepEqual(
+    form.holds.map((h) => h.conditions),
+    [[state], [template], [state]]
+  );
+});
+
 test("absent options show the card's defaults", () => {
   const form = toFormData({ type: TYPE });
   for (const [key, value] of Object.entries(EDITOR_DEFAULTS)) {
